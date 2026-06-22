@@ -1,0 +1,138 @@
+# ============================================================
+# CHEAT CLIP — .gitignore
+# ============================================================
+
+# ─── SECRETS & ENVIRONMENT ───────────────────────────────────
+.env
+.env.*
+!.env.template
+!.env.example
+
+# ─── NODE / FRONTEND ─────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Build artifacts
+.vite/
+.cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─── PYTHON / BACKEND ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# mypy / pyright
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# ─── SCRATCH / TEMP FILES ────────────────────────────────────
+scratch/
+*.tmp
+*.temp
+*.bak
+
+# ─── EDITOR / IDE ────────────────────────────────────────────
+# VS Code (allow sharing extensions recommendations)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim / Neovim
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+Session.vim
+.netrwhist
+tags
+
+# ─── OPERATING SYSTEM ────────────────────────────────────────
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+
+# ─── MISC ────────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
