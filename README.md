@@ -4,13 +4,20 @@
 
 ---
 
-## ✨ What It Does
+## ✨ Features & What It Does
 
-CHEAT CLIP analyzes any YouTube video using:
+CHEAT CLIP analyzes any YouTube video and offers the following advanced capabilities:
 
-- 📊 **YouTube Viewer Retention Heatmaps** — Real audience re-watch data scraped via `yt-dlp` to identify the exact seconds viewers rewound to most.
-- 🧠 **Google Gemini 2.5 Flash AI** — Processes the timestamped transcript enriched with engagement scores to intelligently identify viral clip candidates with hooks, punchlines, and story arcs.
-- ⚡ **Instant Results** — Returns 10–30 ranked clips with virality scores, key quotes, hook analyses, and precise timestamps — ready to cut.
+- 📊 **Audience Retention Heatmaps** — Scrapes real-time player interaction data via `yt-dlp` to map and highlight the exact moments viewers rewound and re-watched the most.
+- 🧠 **Google Gemini 2.5 Flash AI** — Seamlessly processes transcripts enriched with retention scores to pick hook points, punchlines, and high-energy story arcs.
+- 🕒 **Custom Search Range Selection** — Target recommended clip searches either on the entire video or a custom timestamp range (e.g., `29:00` to `31:15` or raw seconds).
+- 🎬 **Smart Long-Video Handling** — Automatically scales clip generation counts dynamically (extracting 15–60 clips for videos longer than 1 hour, or 10–30 for shorter uploads).
+- 🕓 **Persistent Analysis History** — Local storage caching preserves previously analyzed videos, complete with thumbnails, duration preferences, and timestamps, allowing instant loads without wasting API credits.
+- 🔍 **Interactive Search & Filter** — Filter extracted clips by virality level (High 90%+, Mid/Low) or search terms inside the titles and transcript texts.
+- 📝 **Clip Creation Checklist** — Check off clips as you generate them in your editor. Checkboxes cross out completed entries and mark them with a `✓ CREATED` badge.
+- 📋 **Seamless Multi-Format Export** — Copy individual clips, download the complete dataset as a `JSON` file, or copy the entire list formatted as a clean `Markdown` summary.
+- 📈 **Integrated Analytics** — Integrated with `@vercel/analytics` for traffic and performance monitoring.
+- 🐈‍⬛ **Support Portal** — Built-in donation link supporting project development via Tako.
 
 ---
 
@@ -21,8 +28,10 @@ CHEAT CLIP analyzes any YouTube video using:
 | **Frontend** | React 19 + TypeScript + Vite |
 | **Backend** | Python · FastAPI · Uvicorn |
 | **AI** | Google Gemini 2.5 Flash (via `google-genai`) |
-| **YouTube Data** | `yt-dlp` (metadata + heatmap) · `youtube-transcript-api` (subtitles) |
+| **YouTube Data** | `yt-dlp` (retention heatmap) · `youtube-transcript-api` (auto/manual subtitles) |
 | **Dev Tooling** | `concurrently` · ESLint · TypeScript |
+| **Analytics** | `@vercel/analytics` |
+| **Compatibility** | Windows + Python 3.14 hotfixes built-in (`RTLD_*` flags and `os.uname` mocks) |
 
 ---
 
@@ -32,7 +41,7 @@ CHEAT CLIP analyzes any YouTube video using:
 
 - [Node.js](https://nodejs.org/) v18+
 - [Python](https://www.python.org/) 3.10+
-- A **Google Gemini API Key** → [Get one free at Google AI Studio](https://aistudio.google.com/)
+- **Your own Google Gemini API Key** (Required for real analysis) → [Get one free at Google AI Studio](https://aistudio.google.com/)
 
 ---
 
@@ -56,7 +65,7 @@ Open `backend/.env` and replace the placeholder:
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-> **Tip:** You can also skip this and enter your API key directly in the app's UI at runtime.
+> **Tip:** You can also skip setting it on the server and enter your key directly in the app's UI at runtime.
 
 ### 3. Install frontend dependencies
 
@@ -70,7 +79,7 @@ npm install
 pip install -r backend/requirements.txt
 ```
 
-### 5. Run the full stack (frontend + backend)
+### 5. Run the dev servers (frontend + backend)
 
 ```bash
 npm run dev
@@ -82,52 +91,53 @@ This starts:
 
 ---
 
-## 🔑 API Key Options
+## 🔑 API Key & Setup UI
 
-CHEAT CLIP supports two ways to provide your Gemini API key:
+> [!IMPORTANT]
+> To run the actual AI-powered video analysis, you **must use your own Gemini API Key**. If you don't provide a key, you can still test the interface's features using **Mock Mode**.
 
-| Method | How |
-|---|---|
-| **Environment file** | Set `GEMINI_API_KEY` in `backend/.env` |
-| **In-app input** | Enter the key directly in the web interface at runtime |
-
-> ⚠️ **Never commit your `.env` file** — it is already excluded in `.gitignore`.
+CHEAT CLIP features a refined, secure setup interface:
+- **Environment config**: Read directly from server-side `GEMINI_API_KEY`.
+- **In-app config**: Input your key right next to the helpful `🔑 Get free key` link.
+- **Show/Hide toggle**: Quickly reveal or obscure your key for privacy.
+- **Local storage safety**: Keys provided in-app are stored locally in your browser's memory and are never transmitted to outside servers except for Google's API calls.
 
 ---
 
 ## 📡 API Reference
 
-The backend exposes a simple REST API at `http://localhost:8000`.
+The backend exposes a streaming-capable FastAPI endpoint at `http://localhost:8000`.
 
 ### `GET /api/health`
-Health check — returns `{ "status": "ok" }`.
+Health check — returns `{ "status": "ok", "message": "CHEAT CLIP API is active" }`.
 
 ### `POST /api/analyze`
-
-Analyzes a YouTube video and returns ranked viral clip candidates.
+Analyzes a video and returns a real-time progress stream (Server-Sent Events) followed by the final results.
 
 **Request body:**
 ```json
 {
   "url": "https://www.youtube.com/watch?v=VIDEO_ID",
   "duration": "30s",
-  "api_key": "optional_override_key"
+  "api_key": "optional_override_key",
+  "range_start": 1740.0,
+  "range_end": 1875.0
 }
 ```
 
 | Field | Type | Options | Description |
 |---|---|---|---|
 | `url` | `string` | — | YouTube video URL |
-| `duration` | `string` | `"30s"` · `"60s"` · `"1m+"` | Target clip length |
-| `api_key` | `string` (optional) | — | Override the server's API key. Use `"mock"` for test mode. |
-
-**Response:** A ranked list of clip objects with `title`, `start_time`, `end_time`, `virality_score`, `hook_analysis`, `key_quotes`, and `transcript`.
+| `duration` | `string` | `"30s"` · `"60s"` · `"1m+"` | Target clip length preference |
+| `api_key` | `string` (optional) | — | Override key. Pass `"mock"` to enter Mock Mode. |
+| `range_start` | `number` (optional) | — | Start bound in seconds. |
+| `range_end` | `number` (optional) | — | End bound in seconds. |
 
 ---
 
 ## 🧪 Mock Mode
 
-Want to test the UI without spending API credits? Pass `"mock"` as the API key either in-app or in the request. CHEAT CLIP will return realistic sample clip data without calling Gemini.
+To test UI features without spending API quota, pass `"mock"` as your Gemini API Key in the UI input box. The application will immediately bypass the Gemini API and render a realistic, pre-formed response.
 
 ---
 
@@ -136,20 +146,20 @@ Want to test the UI without spending API credits? Pass `"mock"` as the API key e
 ```
 cheat-clip/
 ├── backend/
-│   ├── main.py              # FastAPI app — all API routes & Gemini logic
-│   ├── requirements.txt     # Python dependencies
-│   ├── .env.template        # Environment variable template (safe to commit)
-│   └── .env                 # ⛔ Your secrets — never commit this
+│   ├── main.py              # FastAPI app — SSE endpoints & dynamic hotfixes
+│   ├── requirements.txt     # Python backend dependencies
+│   ├── .env.template        # Sample environment variables
+│   └── .env                 # API keys (git-ignored)
 ├── src/
-│   ├── App.tsx              # Main React application
+│   ├── App.tsx              # Main dashboard React application & checklist engine
 │   ├── components/
-│   │   └── HeatmapTimeline.tsx  # Viewer retention heatmap visualizer
-│   ├── types.ts             # Shared TypeScript interfaces
-│   └── index.css            # Global styles
+│   │   └── HeatmapTimeline.tsx  # Dynamic interactive retention heatmap component
+│   ├── types.ts             # TypeScript definitions
+│   └── index.css            # Premium dark style system
 ├── public/                  # Static assets
-├── index.html               # App entry point
+├── index.html               # Frontend HTML root
 ├── vite.config.ts           # Vite configuration
-└── package.json             # Node.js dependencies & scripts
+└── package.json             # Node dependencies and build scripts
 ```
 
 ---
@@ -158,20 +168,12 @@ cheat-clip/
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start frontend + backend concurrently |
-| `npm run dev-frontend` | Start only the Vite dev server |
-| `npm run dev-backend` | Start only the FastAPI server |
-| `npm run build` | Build the frontend for production |
-| `npm run lint` | Run ESLint |
-| `npm run preview` | Preview the production build |
-
----
-
-## 🛡️ Security Notes
-
-- `backend/.env` and `.env` are git-ignored — your API keys are safe locally.
-- The backend accepts API keys at request time for multi-user flexibility.
-- CORS is open (`*`) in development mode — restrict `allow_origins` before deploying to production.
+| `npm run dev` | Runs both React Vite and FastAPI servers concurrently. |
+| `npm run dev-frontend` | Starts only the Vite frontend dev server. |
+| `npm run dev-backend` | Starts only the Python FastAPI server. |
+| `npm run build` | Compiles the TypeScript code and bundles the frontend. |
+| `npm run lint` | Runs ESLint syntax and code quality checks. |
+| `npm run preview` | Runs a local web server to preview production builds. |
 
 ---
 
