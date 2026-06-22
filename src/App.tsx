@@ -15,12 +15,39 @@ export default function App() {
   const [durationPref, setDurationPref] = useState<'30s' | '60s' | '1m+'>('30s');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('cheat_clip_gemini_api_key') || '');
   const [showApiKey, setShowApiKey] = useState(false);
-  
+
+  // Custom range selection states
+  const [rangeType, setRangeType] = useState<'entire' | 'custom'>('entire');
+  const [customRangeStart, setCustomRangeStart] = useState<string>('');
+  const [customRangeEnd, setCustomRangeEnd] = useState<string>('');
+
+  const parseTimeToSeconds = (val: string): number | null => {
+    const clean = val.trim();
+    if (!clean) return null;
+
+    // Check if it's just raw number of seconds
+    if (/^\d+(\.\d+)?$/.test(clean)) {
+      return parseFloat(clean);
+    }
+
+    const parts = clean.split(':').map(Number);
+    if (parts.some(isNaN)) return null;
+
+    if (parts.length === 2) {
+      // MM:SS
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      // HH:MM:SS
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return null;
+  };
+
   // Loading & process states
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Results
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [activeClip, setActiveClip] = useState<ViralClip | null>(null);
@@ -29,7 +56,7 @@ export default function App() {
   // Search & Filtering States
   const [searchQuery, setSearchQuery] = useState('');
   const [viralityFilter, setViralityFilter] = useState<'all' | 'high' | 'medium'>('all');
-  
+
   // Assistance feature: Checklist for marked clips
   const [markedClips, setMarkedClips] = useState<Record<string, boolean>>({});
   const [loadingDetails, setLoadingDetails] = useState('');
@@ -43,6 +70,7 @@ export default function App() {
     analyzed_at: string;
     thumbnail: string;
     url: string;
+    range_suffix?: string;
   }
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -120,12 +148,26 @@ export default function App() {
           const raw = localStorage.getItem(key);
           if (!raw) continue;
           const data: AnalyzeResponse = JSON.parse(raw);
-          // key format: cheat_clip_cache_{video_id}_{duration_pref}_{timestamp?}
-          const parts = key.replace('cheat_clip_cache_', '').split('_');
-          const duration_pref = parts[parts.length - 1]; // last segment is duration
-          const video_id = parts.slice(0, parts.length - 1).join('_');
+
+          let duration_pref = '';
+          let video_id = '';
+          let range_suffix = '';
+
+          if (key.includes('_range_')) {
+            const rangeIndex = key.indexOf('_range_');
+            range_suffix = key.substring(rangeIndex); // e.g., "_range_1740_1875"
+            const baseKey = key.substring(0, rangeIndex); // e.g., "cheat_clip_cache_dQw4w9WgXcQ_30s"
+            const parts = baseKey.replace('cheat_clip_cache_', '').split('_');
+            duration_pref = parts[parts.length - 1];
+            video_id = parts.slice(0, parts.length - 1).join('_');
+          } else {
+            const parts = key.replace('cheat_clip_cache_', '').split('_');
+            duration_pref = parts[parts.length - 1];
+            video_id = parts.slice(0, parts.length - 1).join('_');
+          }
+
           // Try reading cached timestamp stored separately
-          const tsKey = `cheat_clip_ts_${video_id}_${duration_pref}`;
+          const tsKey = `cheat_clip_ts_${video_id}_${duration_pref}${range_suffix}`;
           const analyzed_at = localStorage.getItem(tsKey) || new Date().toISOString();
           entries.push({
             video_id,
@@ -134,7 +176,8 @@ export default function App() {
             clip_count: data.clips?.length || 0,
             analyzed_at,
             thumbnail: `https://img.youtube.com/vi/${video_id}/mqdefault.jpg`,
-            url: `https://www.youtube.com/watch?v=${video_id}`
+            url: `https://www.youtube.com/watch?v=${video_id}`,
+            range_suffix
           });
         } catch (_) {
           // Skip malformed entries
@@ -152,13 +195,30 @@ export default function App() {
   }, []);
 
   const loadFromHistory = (entry: HistoryEntry) => {
-    const cacheKey = `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}`;
+    const rangeSuffix = entry.range_suffix || '';
+    const cacheKey = `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
     const raw = localStorage.getItem(cacheKey);
     if (!raw) return;
     try {
       const data: AnalyzeResponse = JSON.parse(raw);
       setUrl(`https://www.youtube.com/watch?v=${entry.video_id}`);
       setDurationPref(entry.duration_pref as '30s' | '60s' | '1m+');
+
+      // Restore range inputs if they were custom
+      if (entry.range_suffix) {
+        setRangeType('custom');
+        const parts = entry.range_suffix.split('_'); // ["", "range", "start", "end"]
+        const startVal = parts[2];
+        const endVal = parts[3];
+
+        setCustomRangeStart(startVal !== '0' ? formatSeconds(Number(startVal)) : '');
+        setCustomRangeEnd(endVal !== 'end' ? formatSeconds(Number(endVal)) : '');
+      } else {
+        setRangeType('entire');
+        setCustomRangeStart('');
+        setCustomRangeEnd('');
+      }
+
       // Destroy any existing player immediately before state resets
       destroyPlayer();
       setLoading(true);
@@ -187,8 +247,9 @@ export default function App() {
 
   const deleteHistoryEntry = (entry: HistoryEntry, e: React.MouseEvent) => {
     e.stopPropagation();
-    const cacheKey = `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}`;
-    const tsKey = `cheat_clip_ts_${entry.video_id}_${entry.duration_pref}`;
+    const rangeSuffix = entry.range_suffix || '';
+    const cacheKey = `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
+    const tsKey = `cheat_clip_ts_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
     localStorage.removeItem(cacheKey);
     localStorage.removeItem(tsKey);
     refreshHistory();
@@ -353,11 +414,11 @@ export default function App() {
   const playClip = (clip: ViralClip) => {
     setActiveClip(clip);
     handleSeek(clip.start_time);
-    
+
     if (clipEndIntervalRef.current !== null) {
       clearInterval(clipEndIntervalRef.current);
     }
-    
+
     // Automatically stop video at end time (optional user experience feature)
     // We can monitor playback and pause if it goes past end_time
     const intervalId = window.setInterval(() => {
@@ -377,7 +438,7 @@ export default function App() {
         }
       }
     }, 300);
-    
+
     clipEndIntervalRef.current = intervalId;
   };
 
@@ -409,15 +470,44 @@ export default function App() {
       return;
     }
 
+    let rangeStartSecs: number | undefined = undefined;
+    let rangeEndSecs: number | undefined = undefined;
+
+    if (rangeType === 'custom') {
+      const parsedStart = parseTimeToSeconds(customRangeStart);
+      const parsedEnd = parseTimeToSeconds(customRangeEnd);
+
+      if (customRangeStart.trim() && parsedStart === null) {
+        setError('Invalid start time format. Please use MM:SS (e.g. 29:00), HH:MM:SS, or raw seconds.');
+        return;
+      }
+      if (customRangeEnd.trim() && parsedEnd === null) {
+        setError('Invalid end time format. Please use MM:SS (e.g. 31:15), HH:MM:SS, or raw seconds.');
+        return;
+      }
+
+      if (parsedStart !== null) rangeStartSecs = parsedStart;
+      if (parsedEnd !== null) rangeEndSecs = parsedEnd;
+
+      if (rangeStartSecs !== undefined && rangeEndSecs !== undefined && rangeStartSecs >= rangeEndSecs) {
+        setError('Start time must be less than end time.');
+        return;
+      }
+    }
+
     // Check localStorage cache first to avoid redundant API/Gemini processing
     const videoId = extractVideoId(url);
-    if (videoId) {
-      const cacheKey = `cheat_clip_cache_${videoId}_${durationPref}`;
+    const rangeSuffix = (rangeStartSecs !== undefined || rangeEndSecs !== undefined)
+      ? `_range_${rangeStartSecs ?? 0}_${rangeEndSecs ?? 'end'}`
+      : '';
+    const cacheKey = videoId ? `cheat_clip_cache_${videoId}_${durationPref}${rangeSuffix}` : null;
+
+    if (cacheKey) {
       const cachedData = localStorage.getItem(cacheKey);
       if (cachedData) {
         try {
           const parsedData: AnalyzeResponse = JSON.parse(cachedData);
-          
+
           setLoading(true);
           setError(null);
           setResult(null);
@@ -439,7 +529,7 @@ export default function App() {
 
           setResult(parsedData);
           setLoading(false);
-          
+
           // Select first clip by default
           if (parsedData.clips && parsedData.clips.length > 0) {
             setActiveClip(parsedData.clips[0]);
@@ -449,7 +539,7 @@ export default function App() {
           setTimeout(() => {
             initPlayer(parsedData.video_id);
           }, 100);
-          
+
           return; // Skip server request
         } catch (e) {
           console.warn('Failed to parse cached clip data, requesting fresh analysis:', e);
@@ -474,12 +564,14 @@ export default function App() {
           url: url.trim(),
           duration: durationPref,
           api_key: apiKey.trim() || undefined,
+          range_start: rangeStartSecs,
+          range_end: rangeEndSecs,
         }),
       });
 
       if (!response.body) throw new Error('No response stream from server.');
 
-      const reader  = response.body.getReader();
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let streamDone = false;
@@ -506,8 +598,8 @@ export default function App() {
               streamDone = true;
               break;
             } else {
-              if (event.step  !== undefined) setCurrentStep(event.step);
-              if (event.message)             setLoadingDetails(event.message);
+              if (event.step !== undefined) setCurrentStep(event.step);
+              if (event.message) setLoadingDetails(event.message);
             }
           }
           if (streamDone) break;
@@ -518,9 +610,9 @@ export default function App() {
 
       // Cache the successful response
       if (resultData.video_id) {
-        const cacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}`;
-        const tsKey    = `cheat_clip_ts_${resultData.video_id}_${durationPref}`;
-        localStorage.setItem(cacheKey, JSON.stringify(resultData));
+        const targetCacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}${rangeSuffix}`;
+        const tsKey = `cheat_clip_ts_${resultData.video_id}_${durationPref}${rangeSuffix}`;
+        localStorage.setItem(targetCacheKey, JSON.stringify(resultData));
         localStorage.setItem(tsKey, new Date().toISOString());
         refreshHistory();
       }
@@ -569,7 +661,7 @@ Transcript:
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    
+
     setToastMessage("Downloaded clips as JSON successfully!");
     setTimeout(() => setToastMessage(null), 3000);
   };
@@ -596,14 +688,14 @@ Transcript:
 
   // Filter clips based on query and virality filters
   const filteredClips = result?.clips.filter(clip => {
-    const matchesSearch = searchQuery.trim() === '' || 
-      clip.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = searchQuery.trim() === '' ||
+      clip.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       clip.transcript.toLowerCase().includes(searchQuery.toLowerCase());
-    
+
     const matchesVirality = viralityFilter === 'all' ||
       (viralityFilter === 'high' && clip.virality_score >= 90) ||
       (viralityFilter === 'medium' && clip.virality_score < 90);
-    
+
     return matchesSearch && matchesVirality;
   }) || [];
 
@@ -620,23 +712,38 @@ Transcript:
       )}
 
       {/* Header Area */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      <header className="app-header">
+        <div className="header-logo">
           <span style={{ fontSize: '2.5rem' }}>⚡</span>
           <div>
-            <h1 className="text-gradient" style={{ fontSize: '2.25rem', fontFamily: 'Outfit', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '-0.03em' }}>CHEAT CLIP</h1>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>AI-Powered YouTube Viral Hook & Hotspot Finder</p>
+            <h1 className="text-gradient logo-title">CHEAT CLIP</h1>
+            <p className="header-subtitle">AI-Powered YouTube Viral Hook & Hotspot Finder</p>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textDecoration: 'none', transition: 'var(--transition-smooth)' }} className="nav-link">Get Gemini Key</a>
+        <div className="header-nav">
+          <a
+            href="https://tako.id/johansa"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="glowing-btn"
+            style={{
+              padding: '0.5rem 1rem',
+              fontSize: '0.8rem',
+              borderRadius: '8px',
+              textDecoration: 'none',
+              boxShadow: '0 4px 12px rgba(255, 94, 58, 0.2)',
+              background: 'linear-gradient(135deg, var(--secondary) 0%, #f43f5e 100%)'
+            }}
+          >
+            🐈‍⬛ Support This Project
+          </a>
         </div>
       </header>
 
       {/* Main Form controls panel */}
       <section className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <form onSubmit={handleAnalyze} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', alignItems: 'end' }}>
+          <div className="form-main-input-row">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>YouTube Video URL</label>
               <input
@@ -675,7 +782,7 @@ Transcript:
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+          <div className="form-settings-grid">
             {/* Preferred Duration Selector */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Target Clip Duration</label>
@@ -714,12 +821,24 @@ Transcript:
                   Gemini API Key
                   <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', padding: '0.1rem 0.35rem', letterSpacing: '0.04em' }}>REQUIRED</span>
                 </span>
-                <span
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  style={{ cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem' }}
-                >
-                  {showApiKey ? 'Hide key' : 'Show key'}
-                </span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <a
+                    href="https://aistudio.google.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--primary)', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600, transition: 'var(--transition-smooth)' }}
+                    className="action-link-btn"
+                  >
+                    🔑 Get free key
+                  </a>
+                  <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: '0.75rem' }}>|</span>
+                  <span
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    style={{ cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem' }}
+                  >
+                    {showApiKey ? 'Hide key' : 'Show key'}
+                  </span>
+                </div>
               </label>
               <input
                 id="gemini-key-input"
@@ -738,11 +857,69 @@ Transcript:
               />
               {!apiKey.trim() && (
                 <span style={{ fontSize: '0.75rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                   Required — your key is saved locally in your browser and never sent to our servers.
                 </span>
               )}
             </div>
+          </div>
+
+          {/* Custom Search Range Section */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem', marginTop: '0.5rem' }}>
+            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Analysis Range</label>
+            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="rangeType"
+                  checked={rangeType === 'entire'}
+                  onChange={() => setRangeType('entire')}
+                  style={{ accentColor: 'var(--primary)' }}
+                  disabled={loading}
+                />
+                Entire Video
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="rangeType"
+                  checked={rangeType === 'custom'}
+                  onChange={() => setRangeType('custom')}
+                  style={{ accentColor: 'var(--primary)' }}
+                  disabled={loading}
+                />
+                Custom Range
+              </label>
+
+              {rangeType === 'custom' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Start (e.g. 29:00)"
+                    value={customRangeStart}
+                    onChange={(e) => setCustomRangeStart(e.target.value)}
+                    style={{ width: '150px', padding: '0.5rem 0.75rem', fontSize: '0.875rem' }}
+                    disabled={loading}
+                  />
+                  <span style={{ color: 'var(--text-muted)' }}>to</span>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="End (e.g. 31:15)"
+                    value={customRangeEnd}
+                    onChange={(e) => setCustomRangeEnd(e.target.value)}
+                    style={{ width: '150px', padding: '0.5rem 0.75rem', fontSize: '0.875rem' }}
+                    disabled={loading}
+                  />
+                </div>
+              )}
+            </div>
+            {rangeType === 'custom' && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Supports format like <b>MM:SS</b> (e.g., 29:00), <b>HH:MM:SS</b>, or raw seconds (e.g., 600).
+              </span>
+            )}
           </div>
         </form>
 
@@ -851,7 +1028,7 @@ Transcript:
         <section className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '3rem 2rem' }}>
           <div style={{ width: '100%', maxWidth: '500px' }}>
             <h3 style={{ textAlign: 'center', marginBottom: '1.5rem' }} className="text-gradient">Decoding Video Engagement</h3>
-            
+
             <div className="stepper-container">
               <div className={`step-item ${currentStep === 1 ? 'active' : currentStep > 1 ? 'completed' : ''}`}>
                 <div className="step-circle">{currentStep > 1 ? '✓' : '1'}</div>
@@ -877,12 +1054,12 @@ Transcript:
                 </div>
               </div>
             </div>
-            
+
             <div style={{ marginTop: '2.5rem', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
-              <div 
-                style={{ 
-                  height: '100%', 
-                  background: 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)', 
+              <div
+                style={{
+                  height: '100%',
+                  background: 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)',
                   width: `${(currentStep / 4) * 100}%`,
                   transition: 'width 0.5s ease'
                 }}
@@ -903,11 +1080,11 @@ Transcript:
           <div className="sticky-player-panel">
             <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <h2 style={{ fontSize: '1.25rem', lineHeight: 1.3 }}>{result.title}</h2>
-              
+
               <div id="youtube-player-container" className="video-wrapper">
                 <div id="youtube-player"></div>
               </div>
-              
+
               {/* Heatmap Timeline component */}
               <HeatmapTimeline
                 duration={result.duration}
@@ -917,14 +1094,14 @@ Transcript:
                 activeClip={activeClip}
               />
             </div>
-            
+
             {/* AI Summary card */}
             <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.05rem', color: 'var(--primary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Video Summary</h3>
                 <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{result.summary}</p>
               </div>
-              
+
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
                 <h3 style={{ fontSize: '1.05rem', color: 'var(--secondary)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Generated Clips Overview ({result.clips.length})
@@ -935,18 +1112,18 @@ Transcript:
                     const clipKey = `${clip.start_time}_${clip.end_time}`;
                     const isMarked = !!markedClips[clipKey];
                     return (
-                      <div 
-                        key={idx} 
+                      <div
+                        key={idx}
                         onClick={() => setActiveClip(clip)}
-                        style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center', 
-                          fontSize: '0.8rem', 
-                          padding: '0.5rem', 
-                          borderRadius: '6px', 
-                          background: isSelected 
-                            ? 'rgba(255, 94, 58, 0.1)' 
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '0.8rem',
+                          padding: '0.5rem',
+                          borderRadius: '6px',
+                          background: isSelected
+                            ? 'rgba(255, 94, 58, 0.1)'
                             : 'rgba(255, 255, 255, 0.02)',
                           border: isSelected
                             ? '1px solid var(--secondary)'
@@ -964,14 +1141,14 @@ Transcript:
                               e.stopPropagation();
                               toggleMarkedClip(clipKey);
                             }}
-                            style={{ 
-                              width: '14px', 
-                              height: '14px', 
+                            style={{
+                              width: '14px',
+                              height: '14px',
                               cursor: 'pointer',
                               accentColor: 'var(--secondary)'
                             }}
                           />
-                          <span style={{ 
+                          <span style={{
                             fontWeight: isSelected ? 700 : 500,
                             color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                             textDecoration: isMarked ? 'line-through' : 'none',
@@ -1021,7 +1198,7 @@ Transcript:
                 <h2 style={{ fontSize: '1.5rem', fontFamily: 'Outfit' }}>Recommended Clips</h2>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>SORTED BY VIRALITY POTENTIAL</span>
               </div>
-              
+
               {/* Search & Filter Controls */}
               <div className="filter-controls-bar">
                 <input
@@ -1032,7 +1209,7 @@ Transcript:
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{ padding: '0.6rem 1rem', fontSize: '0.875rem' }}
                 />
-                
+
                 <select
                   className="form-input virality-filter-select"
                   value={viralityFilter}
@@ -1071,7 +1248,7 @@ Transcript:
                 </div>
               </div>
             </div>
-            
+
             <div className="clips-list">
               {filteredClips.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
@@ -1081,7 +1258,7 @@ Transcript:
                 filteredClips.map((clip, index) => {
                   const isActive = activeClip?.start_time === clip.start_time && activeClip?.end_time === clip.end_time;
                   const isExpanded = expandedClipIndex === index;
-                  
+
                   return (
                     <div
                       key={index}
@@ -1093,7 +1270,7 @@ Transcript:
                       }}
                     >
                       {/* Header */}
-                      <div className="clip-header" style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                      <div className="clip-header">
                         <div style={{ display: 'flex', alignItems: 'center', marginTop: '0.25rem' }}>
                           <input
                             type="checkbox"
@@ -1102,9 +1279,9 @@ Transcript:
                               e.stopPropagation();
                               toggleMarkedClip(`${clip.start_time}_${clip.end_time}`);
                             }}
-                            style={{ 
-                              width: '18px', 
-                              height: '18px', 
+                            style={{
+                              width: '18px',
+                              height: '18px',
                               cursor: 'pointer',
                               accentColor: 'var(--primary)'
                             }}
@@ -1165,7 +1342,7 @@ Transcript:
                         >
                           ⚡ Preview Clip
                         </button>
-                        
+
                         <div style={{ display: 'flex', gap: '0.75rem' }}>
                           <button
                             type="button"
@@ -1175,7 +1352,7 @@ Transcript:
                           >
                             📋 Copy Timestamp
                           </button>
-                          <span 
+                          <span
                             style={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}
                           >
                             {isExpanded ? 'Hide Transcript ▲' : 'Show Transcript ▼'}
@@ -1185,8 +1362,8 @@ Transcript:
 
                       {/* Expandable transcript text block */}
                       {isExpanded && (
-                        <div 
-                          className="transcript-box" 
+                        <div
+                          className="transcript-box"
                           onClick={(e) => e.stopPropagation()} /* Prevents collapse */
                         >
                           <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Transcript</div>

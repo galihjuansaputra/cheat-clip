@@ -58,6 +58,8 @@ class AnalyzeRequest(BaseModel):
     url: str = Field(..., description="YouTube video URL")
     duration: str = Field("30s", description="Target clip duration: '30s', '60s', or '1m+'")
     api_key: Optional[str] = Field(None, description="Optional custom Gemini API key provided by the user")
+    range_start: Optional[float] = Field(None, description="Search range start in seconds")
+    range_end: Optional[float] = Field(None, description="Search range end in seconds")
 
 class HeatmapPoint(BaseModel):
     start_time: float
@@ -300,6 +302,37 @@ async def analyze_video(request: AnalyzeRequest):
             last = transcript_lines[-1]
             duration = last.get("start", 0.0) + last.get("duration", 0.0)
 
+        # Slice transcript based on custom search range if provided
+        start_bound = 0.0
+        end_bound = duration
+        if request.range_start is not None or request.range_end is not None:
+            start_bound = request.range_start if request.range_start is not None else 0.0
+            end_bound = request.range_end if request.range_end is not None else duration
+
+            if start_bound < 0.0:
+                start_bound = 0.0
+            if end_bound > duration:
+                end_bound = duration
+
+            if start_bound >= end_bound:
+                yield _sse({"error": "Invalid search range: start time must be less than end time.", "status": 400})
+                return
+
+            filtered_lines = []
+            for line in transcript_lines:
+                ls = line.get("start", 0.0)
+                le = ls + line.get("duration", 0.0)
+                if max(ls, start_bound) < min(le, end_bound):
+                    filtered_lines.append(line)
+            
+            transcript_lines = filtered_lines
+            if not transcript_lines:
+                yield _sse({"error": f"No subtitles found in the specified range {start_bound}s to {end_bound}s.", "status": 400})
+                return
+            
+            duration = end_bound - start_bound
+            logger.info(f"Filtered transcript to custom range: {start_bound}s to {end_bound}s (duration: {duration}s)")
+
         # Enrich transcript with heatmap engagement scores
         enriched_transcript = []
         for line in transcript_lines:
@@ -372,7 +405,7 @@ async def analyze_video(request: AnalyzeRequest):
             f"You are a viral video clip finder.\n"
             f"Find {clip_range} short-form clip candidates from this YouTube transcript for TikTok/Reels/Shorts.\n\n"
             f"Title: {title}\n"
-            f"Duration: {int(duration)}s | Target clip length: {dur_range}\n"
+            f"Duration Range: {int(start_bound)}s to {int(end_bound)}s (Length: {int(duration)}s) | Target clip length: {dur_range}\n"
             f"{heatmap_note}\n"
             f"Match output language to transcript language.\n\n"
             f"Transcript (start|end[|interest] text):\n---\n{transcript_text}\n---\n\n"

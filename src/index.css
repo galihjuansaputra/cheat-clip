@@ -402,15 +402,15 @@ h1, h2, h3, h4 {
 }
 
 .score-high {
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--accent);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgba(255, 94, 58, 0.12);
+  color: var(--secondary);
+  border: 1px solid rgba(255, 94, 58, 0.35);
 }
 
 .score-medium {
-  background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--primary);
+  border: 1px solid rgba(168, 85, 247, 0.35);
 }
 
 .score-meta {
@@ -524,4 +524,154 @@ h1, h2, h3, h4 {
 .action-link-btn:hover {
   opacity: 1;
   text-shadow: 0 0 8px currentColor;
+}
+
+/* ----------------------------------------------------------------
+   Responsive Layout Classes & Mobile Optimizations
+   ---------------------------------------------------------------- */
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 1.5rem;
+}
+
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logo-title {
+  font-size: 2.25rem;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.header-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.nav-link {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: var(--transition-smooth);
+}
+
+.nav-link:hover {
+  color: var(--primary);
+  text-shadow: 0 0 8px var(--primary-glow);
+}
+
+.form-main-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.form-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+/* Tablet and Mobile Media Queries */
+@media (max-width: 1024px) {
+  .sticky-player-panel {
+    position: static; /* Disable sticky positioning on single-column wrapper to prevent overlapping content */
+  }
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem;
+    gap: 1.5rem;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+  }
+
+  .header-nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .logo-title {
+    font-size: 1.75rem;
+  }
+
+  .header-logo span {
+    font-size: 2rem !important;
+  }
+
+  .glass-panel {
+    padding: 1.25rem;
+  }
+
+  .form-main-input-row {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .form-main-input-row button {
+    width: 100%;
+    height: 48px;
+  }
+
+  .form-settings-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .duration-selector {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .duration-btn {
+    width: 100%;
+    padding: 0.6rem;
+  }
+
+  .toast-msg {
+    bottom: 1rem;
+    right: 1rem;
+    left: 1rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    justify-content: center;
+  }
+
+  .filter-controls-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .virality-filter-select {
+    width: 100% !important;
+  }
+
+  .clip-header {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
 }
