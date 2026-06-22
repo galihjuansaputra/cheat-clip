@@ -266,6 +266,14 @@ export default function App() {
       }
     }
 
+    // Ensure target container is rendered in the DOM before instantiating the player.
+    // If React hasn't completed mounting the dashboard yet, wait and retry.
+    const container = document.getElementById('youtube-player-container');
+    if (!container) {
+      setTimeout(() => initPlayer(videoId, forceRecreate), 100);
+      return;
+    }
+
     // Destroy any stale player first
     if (playerRef.current) {
       destroyPlayer();
@@ -273,41 +281,45 @@ export default function App() {
 
     // Create player if YT API is loaded
     if (window.YT && window.YT.Player) {
-      // Ensure target div exists (may have been cleared by destroy)
-      const container = document.getElementById('youtube-player-container');
-      if (container && !document.getElementById('youtube-player')) {
+      if (!document.getElementById('youtube-player')) {
         container.innerHTML = '<div id="youtube-player"></div>';
       }
-      playerRef.current = new window.YT.Player('youtube-player', {
-        videoId: videoId,
-        playerVars: {
-          autoplay: 0,
-          modestbranding: 1,
-          rel: 0,
-          controls: 1,
-          fs: 1,
-        },
-        events: {
-          onReady: () => {
-            console.log('YouTube Player Ready');
+      try {
+        playerRef.current = new window.YT.Player('youtube-player', {
+          videoId: videoId,
+          playerVars: {
+            autoplay: 0,
+            modestbranding: 1,
+            rel: 0,
+            controls: 1,
+            fs: 1,
           },
-          onStateChange: (event: any) => {
-            // YT.PlayerState.PLAYING = 1
-            if (event.data === 1) {
-              startTracking();
-            } else {
-              stopTracking();
-              // Update currentTime on pause/stop to sync cursor
-              if (playerRef.current && playerRef.current.getCurrentTime) {
-                setCurrentTime(playerRef.current.getCurrentTime());
+          events: {
+            onReady: () => {
+              console.log('YouTube Player Ready');
+            },
+            onStateChange: (event: any) => {
+              // YT.PlayerState.PLAYING = 1
+              if (event.data === 1) {
+                startTracking();
+              } else {
+                stopTracking();
+                // Update currentTime on pause/stop to sync cursor
+                if (playerRef.current && playerRef.current.getCurrentTime) {
+                  setCurrentTime(playerRef.current.getCurrentTime());
+                }
               }
-            }
+            },
           },
-        },
-      });
+        });
+      } catch (err) {
+        console.error('Error instantiating YouTube Player:', err);
+        // Fallback retry in case of transient iframe injection issues
+        setTimeout(() => initPlayer(videoId, forceRecreate), 300);
+      }
     } else {
-      // Try again in 500ms
-      setTimeout(() => initPlayer(videoId, forceRecreate), 500);
+      // Try again in 200ms if global window.YT is not ready yet
+      setTimeout(() => initPlayer(videoId, forceRecreate), 200);
     }
   };
 
@@ -450,30 +462,14 @@ export default function App() {
     setResult(null);
     setActiveClip(null);
     setCurrentStep(1);
-    setLoadingDetails('Connecting to YouTube and resolving video metadata...');
+    setLoadingDetails('Connecting to YouTube...');
 
-    // Simulate stepper progress and update details dynamically for fresh request
-    const stepsTimer1 = setTimeout(() => {
-      setCurrentStep(2);
-      setLoadingDetails('Scraping viewer retention heatmap points...');
-    }, 2000);
-    
-    const stepsTimer2 = setTimeout(() => {
-      setCurrentStep(3);
-      setLoadingDetails('Retrieving native subtitles and parsing transcript lines...');
-    }, 4500);
-    
-    const stepsTimer3 = setTimeout(() => {
-      setCurrentStep(4);
-      setLoadingDetails('Sending transcript to Gemini 2.5 Flash for deep virality analysis (10 to 30 clips)...');
-    }, 7000);
+    let resultData: AnalyzeResponse | null = null;
 
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: url.trim(),
           duration: durationPref,
@@ -481,53 +477,61 @@ export default function App() {
         }),
       });
 
-      if (!response.ok) {
-        let errorMessage = 'Failed to analyze video';
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.detail || errorMessage;
-        } catch (_) {
-          try {
-            const errorText = await response.text();
-            errorMessage = errorText || errorMessage;
-          } catch (__) {}
+      if (!response.body) throw new Error('No response stream from server.');
+
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamDone = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        // SSE events are separated by double newlines
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          for (const line of part.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            let event: any;
+            try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+            if (event.error) {
+              throw new Error(event.error);
+            } else if (event.done) {
+              resultData = event.result as AnalyzeResponse;
+              streamDone = true;
+              break;
+            } else {
+              if (event.step  !== undefined) setCurrentStep(event.step);
+              if (event.message)             setLoadingDetails(event.message);
+            }
+          }
+          if (streamDone) break;
         }
-        throw new Error(errorMessage);
       }
 
-      const data: AnalyzeResponse = await response.json();
-      
-      // Clear steps timers
-      clearTimeout(stepsTimer1);
-      clearTimeout(stepsTimer2);
-      clearTimeout(stepsTimer3);
+      if (!resultData) throw new Error('Analysis completed but no result was received.');
 
-      // Cache the successful response in localStorage with timestamp
-      if (data.video_id) {
-        const cacheKey = `cheat_clip_cache_${data.video_id}_${durationPref}`;
-        const tsKey = `cheat_clip_ts_${data.video_id}_${durationPref}`;
-        localStorage.setItem(cacheKey, JSON.stringify(data));
+      // Cache the successful response
+      if (resultData.video_id) {
+        const cacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}`;
+        const tsKey    = `cheat_clip_ts_${resultData.video_id}_${durationPref}`;
+        localStorage.setItem(cacheKey, JSON.stringify(resultData));
         localStorage.setItem(tsKey, new Date().toISOString());
         refreshHistory();
       }
 
-      setResult(data);
+      setResult(resultData);
       setLoading(false);
-      
-      // Select first clip by default
-      if (data.clips && data.clips.length > 0) {
-        setActiveClip(data.clips[0]);
-      }
 
-      // Initialize player in next tick
-      setTimeout(() => {
-        initPlayer(data.video_id);
-      }, 100);
+      if (resultData.clips?.length > 0) setActiveClip(resultData.clips[0]);
+      setTimeout(() => initPlayer(resultData!.video_id), 100);
 
     } catch (err: any) {
-      clearTimeout(stepsTimer1);
-      clearTimeout(stepsTimer2);
-      clearTimeout(stepsTimer3);
       setError(err.message || 'An unexpected error occurred during analysis.');
       setLoading(false);
     }
@@ -544,7 +548,6 @@ export default function App() {
     const copyText = `CLIP: ${clip.title}
 Timestamp: ${formatSeconds(clip.start_time)} - ${formatSeconds(clip.end_time)}
 Virality Score: ${clip.virality_score}%
-Why it's viral: ${clip.hook_analysis}
 
 Transcript:
 "${clip.transcript}"`;
@@ -578,7 +581,6 @@ Transcript:
     result.clips.forEach((clip, index) => {
       md += `## ${index + 1}. ${clip.title} (${clip.virality_score}% Virality)\n`;
       md += `- **Timestamp**: ${formatSeconds(clip.start_time)} - ${formatSeconds(clip.end_time)} (Duration: ${formatSeconds(clip.end_time - clip.start_time)})\n`;
-      md += `- **Hook Analysis**: ${clip.hook_analysis}\n`;
       if (clip.key_quotes && clip.key_quotes.length > 0) {
         md += `- **Key Quotes**:\n`;
         clip.key_quotes.forEach(q => md += `  - *"${q}"*\n`);
@@ -596,8 +598,7 @@ Transcript:
   const filteredClips = result?.clips.filter(clip => {
     const matchesSearch = searchQuery.trim() === '' || 
       clip.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      clip.transcript.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      clip.hook_analysis.toLowerCase().includes(searchQuery.toLowerCase());
+      clip.transcript.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesVirality = viralityFilter === 'all' ||
       (viralityFilter === 'high' && clip.virality_score >= 90) ||
@@ -866,7 +867,14 @@ Transcript:
               </div>
               <div className={`step-item ${currentStep === 4 ? 'active' : ''}`}>
                 <div className="step-circle">4</div>
-                <div className="step-label">AI analysis & viral clip extraction</div>
+                <div className="step-label">
+                  AI analysis & viral clip extraction
+                  {currentStep === 4 && (
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', fontWeight: 400 }}>
+                      This step can take 30–90 seconds depending on video length
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -1134,9 +1142,6 @@ Transcript:
                           )}
                         </div>
                       </div>
-
-                      {/* Virality description */}
-                      <p className="clip-analysis">{clip.hook_analysis}</p>
 
                       {/* Key spoken quotes */}
                       {clip.key_quotes && clip.key_quotes.length > 0 && (

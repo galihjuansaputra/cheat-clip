@@ -169,6 +169,16 @@ h1, h2, h3, h4 {
   box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.15);
 }
 
+.form-input.input-error-highlight {
+  border-color: rgba(248, 113, 113, 0.5);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.1);
+}
+
+.form-input.input-error-highlight:focus {
+  border-color: #f87171;
+  box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.18);
+}
+
 /* Custom Segmented Control for duration */
 .duration-selector {
   display: flex;

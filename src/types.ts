@@ -8,7 +8,6 @@ export interface ViralClip {
   title: string;
   start_time: number;
   end_time: number;
-  hook_analysis: string;
   virality_score: number;
   key_quotes: string[];
   transcript: string;
