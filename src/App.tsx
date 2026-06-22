@@ -391,6 +391,12 @@ export default function App() {
     e.preventDefault();
     if (!url.trim()) return;
 
+    // Require an API key before making any request
+    if (!apiKey.trim()) {
+      setError('A Gemini API Key is required to analyze videos. Get a free key at aistudio.google.com and paste it in the field below.');
+      return;
+    }
+
     // Check localStorage cache first to avoid redundant API/Gemini processing
     const videoId = extractVideoId(url);
     if (videoId) {
@@ -700,12 +706,15 @@ Transcript:
               </div>
             </div>
 
-            {/* Custom API Key input */}
+            {/* API Key input — required */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                <span>Custom Gemini API Key <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(Optional)</span></span>
-                <span 
-                  onClick={() => setShowApiKey(!showApiKey)} 
+                <span>
+                  Gemini API Key
+                  <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', padding: '0.1rem 0.35rem', letterSpacing: '0.04em' }}>REQUIRED</span>
+                </span>
+                <span
+                  onClick={() => setShowApiKey(!showApiKey)}
                   style={{ cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem' }}
                 >
                   {showApiKey ? 'Hide key' : 'Show key'}
@@ -714,16 +723,24 @@ Transcript:
               <input
                 id="gemini-key-input"
                 type={showApiKey ? 'text' : 'password'}
-                className="form-input"
-                placeholder="Enter Gemini API Key (stored in browser memory only)"
+                className={`form-input${!apiKey.trim() ? ' input-error-highlight' : ''}`}
+                placeholder="Paste your Gemini API Key here — get one free at aistudio.google.com"
                 value={apiKey}
                 onChange={(e) => {
                   const val = e.target.value;
                   setApiKey(val);
                   localStorage.setItem('cheat_clip_gemini_api_key', val);
+                  // Clear error as soon as user starts typing
+                  if (val.trim()) setError(null);
                 }}
                 disabled={loading}
               />
+              {!apiKey.trim() && (
+                <span style={{ fontSize: '0.75rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  Required — your key is saved locally in your browser and never sent to our servers.
+                </span>
+              )}
             </div>
           </div>
         </form>
