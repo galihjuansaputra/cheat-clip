@@ -113,7 +113,8 @@ def fetch_video_metadata(url: str):
         'skip_download': True,
         'youtube_include_dash_manifest': False,
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'nocheckcertificate': True
     }
     if proxy_url:
         ydl_opts['proxy'] = proxy_url
@@ -156,9 +157,14 @@ def fetch_transcript(video_id: str) -> List[dict]:
 
     proxy_url = os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
     if proxy_url:
-        from youtube_transcript_api.proxies import GenericProxyConfig
-        proxy_config = GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
-        api = YouTubeTranscriptApi(proxy_config=proxy_config)
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        session = requests.Session()
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        session.verify = False
+        api = YouTubeTranscriptApi(http_client=session)
     else:
         api = YouTubeTranscriptApi()
 
