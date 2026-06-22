@@ -1,4 +1,16 @@
 import os
+import sys
+
+# Windows Python 3.14 compatibility hotfix for unix RTLD flags and uname used in yt-dlp plugins
+for flag in ('RTLD_LAZY', 'RTLD_NOW', 'RTLD_GLOBAL', 'RTLD_LOCAL', 'RTLD_NODELETE', 'RTLD_NOLOAD', 'RTLD_DEEPBIND'):
+    if not hasattr(os, flag):
+        setattr(os, flag, 1)
+
+if not hasattr(os, 'uname'):
+    from collections import namedtuple
+    UnameResult = namedtuple('UnameResult', ['sysname', 'nodename', 'release', 'version', 'machine'])
+    os.uname = lambda: UnameResult('Windows', 'localhost', '10', '10.0', 'AMD64')
+
 import re
 import logging
 import asyncio
@@ -106,10 +118,12 @@ def fetch_video_metadata(url: str):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
+            if not info:
+                raise Exception("yt-dlp returned empty info dict")
             return {
-                "title": info.get('title', 'Unknown YouTube Video'),
-                "duration": info.get('duration', 0.0),
-                "heatmap": info.get('heatmap', [])
+                "title": info.get('title') or 'Unknown YouTube Video',
+                "duration": float(info.get('duration') or 0.0),
+                "heatmap": info.get('heatmap') or []
             }
         except Exception as e:
             logger.error(f"Error extracting metadata with yt-dlp: {e}")
