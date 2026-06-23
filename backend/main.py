@@ -168,7 +168,7 @@ def fetch_transcript(video_id: str) -> List[dict]:
     else:
         api = YouTubeTranscriptApi()
 
-    # ── Strategy 1: direct fetch by language priority (id first) ─────────────
+    # ── Strategy 1: direct fetch by language priority ────────────────────────
     priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'ar', 'hi', 'ru']
     for lang in priority_langs:
         try:
@@ -302,7 +302,7 @@ async def analyze_video(request: AnalyzeRequest):
             yield _sse({"step": 2, "message": "No heatmap available for this video — will rely on transcript content analysis."})
 
         # ── Step 3: Transcript ───────────────────────────────────────────────
-        yield _sse({"step": 3, "message": "Fetching subtitles — trying Bahasa Indonesia first..."})
+        yield _sse({"step": 3, "message": "Fetching subtitles — trying video's original language..."})
 
         try:
             transcript_lines = await asyncio.to_thread(fetch_transcript, video_id)
