@@ -50,6 +50,9 @@ class ViralClip(BaseModel):
     virality_score: int = Field(description="Virality score 1-100")
     key_quotes: List[str] = Field(description="1-2 key quotes from the clip")
     transcript: str = Field(description="Spoken text of the clip")
+    title_suggestion: str = Field(default="", description="Catchy alternative title suggestion")
+    caption_suggestion: str = Field(default="", description="Engaging social media caption suggestion")
+    hashtag_suggestion: str = Field(default="", description="Relevant hashtags suggestion (e.g. #hashtag1 #hashtag2)")
 
 class ViralClipGemini(BaseModel):
     title: str = Field(description="Catchy clip title, max 8 words")
@@ -57,9 +60,12 @@ class ViralClipGemini(BaseModel):
     end_time: float = Field(description="Clip end in seconds, aligned to a sentence boundary")
     virality_score: int = Field(description="Virality score 1-100")
     key_quotes: List[str] = Field(description="1-2 key quotes from the clip")
+    title_suggestion: str = Field(default="", description="Catchy alternative title suggestion")
+    caption_suggestion: str = Field(default="", description="Engaging social media caption suggestion")
+    hashtag_suggestion: str = Field(default="", description="Relevant hashtags suggestion (e.g. #hashtag1 #hashtag2)")
 
 class VideoAnalysis(BaseModel):
-    summary: str = Field(description="1-2 sentence video summary")
+    summary: str = Field(description="1-2 sentence video summary, followed by 2-4 general hashtags (e.g. #podcast #marriage #success)")
     clips: List[ViralClipGemini] = Field(description="List of viral clip candidates (10-30 for shorter videos, or 15-60 for videos longer than 1 hour), sorted by virality_score desc")
 
 # ----------------------------------------------------------------
@@ -382,13 +388,22 @@ async def analyze_video(request: AnalyzeRequest):
             mock_clips = [
                 ViralClip(title="Finding hotspots using heatmaps",  start_time=11.0, end_time=22.0, virality_score=95,
                           key_quotes=["Uses YouTube player heatmaps.", "Processes using Gemini AI."],
-                          transcript="Most people think it's magic. But it uses YouTube player heatmaps."),
+                          transcript="Most people think it's magic. But it uses YouTube player heatmaps.",
+                          title_suggestion="Unlock Video Virality Secrets",
+                          caption_suggestion="Stop guessing what works! Here's how to use heatmaps to find viral hotspots in seconds. 🔥",
+                          hashtag_suggestion="#viralclips #videoediting #heatmaps #aitools"),
                 ViralClip(title="Grow on TikTok or Reels",          start_time=22.0, end_time=32.0, virality_score=88,
                           key_quotes=["Changing how editors crop videos.", "If you want to grow on TikTok, try it."],
-                          transcript="This is changing how editors crop videos. If you want to grow on TikTok, try it."),
+                          transcript="This is changing how editors crop videos. If you want to grow on TikTok, try it.",
+                          title_suggestion="The Ultimate TikTok Growth Hack",
+                          caption_suggestion="Want to scale your TikTok views? This tool will revolutionize your workflow. 🚀",
+                          hashtag_suggestion="#tiktokgrowth #reels #shorts #editingtips"),
                 ViralClip(title="Introductory overview of the tool", start_time=0.0,  end_time=11.0, virality_score=72,
                           key_quotes=["Hello and welcome.", "Finds viral hotspots."],
-                          transcript="Hello and welcome. It finds viral hotspots and highlights them."),
+                          transcript="Hello and welcome. It finds viral hotspots and highlights them.",
+                          title_suggestion="Meet Cheat Clip AI",
+                          caption_suggestion="Say hello to your new AI co-editor. Find the absolute best parts of any video instantly.",
+                          hashtag_suggestion="#cheatclip #aiediting #growthmindset"),
             ]
             mock_heatmap = [
                 HeatmapPoint(start_time=i*10.0, end_time=(i+1)*10.0,
@@ -403,7 +418,7 @@ async def analyze_video(request: AnalyzeRequest):
             result = AnalyzeResponse(
                 video_id=video_id, title=title, duration=duration or 200.0,
                 heatmap=mock_heatmap,
-                summary="Mock analysis: this video explains how CHEAT CLIP works.",
+                summary="Mock analysis: this video explains how CHEAT CLIP works. #aitools #videoediting #productivity",
                 clips=mock_clips
             )
             yield _sse({"done": True, "result": result.model_dump()})
@@ -523,6 +538,9 @@ async def analyze_video(request: AnalyzeRequest):
                         "end_time":      getattr(c, 'end_time', 0.0),
                         "virality_score": getattr(c, 'virality_score', 0),
                         "key_quotes":    getattr(c, 'key_quotes', []),
+                        "title_suggestion": getattr(c, 'title_suggestion', ''),
+                        "caption_suggestion": getattr(c, 'caption_suggestion', ''),
+                        "hashtag_suggestion": getattr(c, 'hashtag_suggestion', ''),
                     }
                     for c in (getattr(parsed, 'clips', []) or [])
                 ]
@@ -562,7 +580,10 @@ async def analyze_video(request: AnalyzeRequest):
                 end_time=end,
                 virality_score=raw_clip.get('virality_score', 0),
                 key_quotes=raw_clip.get('key_quotes') or [],
-                transcript=" ".join(clip_lines)
+                transcript=" ".join(clip_lines),
+                title_suggestion=raw_clip.get('title_suggestion', ''),
+                caption_suggestion=raw_clip.get('caption_suggestion', ''),
+                hashtag_suggestion=raw_clip.get('hashtag_suggestion', '')
             ))
 
         response_heatmap = [

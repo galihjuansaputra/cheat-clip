@@ -451,6 +451,59 @@ h1, h2, h3, h4 {
   color: var(--text-secondary);
 }
 
+.clip-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.015);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  margin-top: 0.75rem;
+}
+
+.suggestion-item {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.suggestion-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.suggestion-value {
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.copy-mini-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  transition: var(--transition-smooth);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.5rem;
+  opacity: 0.6;
+}
+
+.copy-mini-btn:hover {
+  color: var(--primary);
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+}
+
 .transcript-box {
   background: rgba(0, 0, 0, 0.3);
   border-radius: 8px;

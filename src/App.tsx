@@ -635,14 +635,66 @@ export default function App() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const renderSummaryWithHighlights = (summary: string) => {
+    if (!summary) return null;
+    const parts = summary.split(/(#\w+)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith('#')) {
+        return (
+          <span
+            key={idx}
+            className="summary-hashtag-highlight"
+            style={{
+              color: 'var(--primary)',
+              fontWeight: '600',
+              background: 'rgba(168, 85, 247, 0.1)',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              margin: '0 2px',
+              border: '1px solid rgba(168, 85, 247, 0.2)',
+              display: 'inline-block'
+            }}
+          >
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
+  const handleCopyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setToastMessage(`Copied ${label} to clipboard!`);
+      setTimeout(() => {
+        setToastMessage(null);
+      }, 3000);
+    });
+  };
+
   const handleCopyClip = (clip: ViralClip, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent card trigger
-    const copyText = `CLIP: ${clip.title}
+    let copyText = `CLIP: ${clip.title}
 Timestamp: ${formatSeconds(clip.start_time)} - ${formatSeconds(clip.end_time)}
 Virality Score: ${clip.virality_score}%
 
 Transcript:
 "${clip.transcript}"`;
+
+    if (clip.key_quotes && clip.key_quotes.length > 0) {
+      copyText += `\n\nKey Quotes:\n` + clip.key_quotes.map(q => `“${q}”`).join('\n');
+    }
+    if (clip.title_suggestion) {
+      copyText += `\n\nTitle Suggestion: ${clip.title_suggestion}`;
+    }
+    if (clip.caption_suggestion) {
+      const captionText = (() => {
+        if (!clip.hashtag_suggestion) return clip.caption_suggestion;
+        if (clip.caption_suggestion.includes(clip.hashtag_suggestion)) return clip.caption_suggestion;
+        return `${clip.caption_suggestion} ${clip.hashtag_suggestion}`;
+      })();
+      copyText += `\n\nCaption Suggestion: ${captionText}`;
+    }
 
     navigator.clipboard.writeText(copyText).then(() => {
       setToastMessage(`Copied "${clip.title}" details to clipboard!`);
@@ -676,6 +728,17 @@ Transcript:
       if (clip.key_quotes && clip.key_quotes.length > 0) {
         md += `- **Key Quotes**:\n`;
         clip.key_quotes.forEach(q => md += `  - *"${q}"*\n`);
+      }
+      if (clip.title_suggestion) {
+        md += `- **Title Suggestion**: ${clip.title_suggestion}\n`;
+      }
+      if (clip.caption_suggestion) {
+        const captionText = (() => {
+          if (!clip.hashtag_suggestion) return clip.caption_suggestion;
+          if (clip.caption_suggestion.includes(clip.hashtag_suggestion)) return clip.caption_suggestion;
+          return `${clip.caption_suggestion} ${clip.hashtag_suggestion}`;
+        })();
+        md += `- **Caption Suggestion**: ${captionText}\n`;
       }
       md += `- **Transcript**:\n  > ${clip.transcript.replace(/\n/g, '\n  > ')}\n\n`;
     });
@@ -1099,7 +1162,9 @@ Transcript:
             <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.05rem', color: 'var(--primary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Video Summary</h3>
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{result.summary}</p>
+                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  {renderSummaryWithHighlights(result.summary)}
+                </p>
               </div>
 
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
@@ -1326,6 +1391,61 @@ Transcript:
                           {clip.key_quotes.map((quote, qIdx) => (
                             <div key={qIdx} className="quote-item">“{quote}”</div>
                           ))}
+                        </div>
+                      )}
+
+                      {/* Suggestions: Title, Caption */}
+                      {(clip.title_suggestion || clip.caption_suggestion) && (
+                        <div className="clip-suggestions">
+                          {clip.title_suggestion && (
+                            <div className="suggestion-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div style={{ flex: 1 }}>
+                                <span className="suggestion-label">💡 Title:</span>{' '}
+                                <span className="suggestion-value">{clip.title_suggestion}</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="copy-mini-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCopyText(clip.title_suggestion!, 'Title');
+                                }}
+                                title="Copy Title"
+                              >
+                                📋
+                              </button>
+                            </div>
+                          )}
+                          {clip.caption_suggestion && (
+                            <div className="suggestion-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div style={{ flex: 1 }}>
+                                <span className="suggestion-label">📝 Caption:</span>{' '}
+                                <span className="suggestion-value">
+                                  {(() => {
+                                    if (!clip.hashtag_suggestion) return clip.caption_suggestion;
+                                    if (clip.caption_suggestion.includes(clip.hashtag_suggestion)) return clip.caption_suggestion;
+                                    return `${clip.caption_suggestion} ${clip.hashtag_suggestion}`;
+                                  })()}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                className="copy-mini-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const captionText = (() => {
+                                    if (!clip.hashtag_suggestion) return clip.caption_suggestion;
+                                    if (clip.caption_suggestion.includes(clip.hashtag_suggestion)) return clip.caption_suggestion;
+                                    return `${clip.caption_suggestion} ${clip.hashtag_suggestion}`;
+                                  })();
+                                  handleCopyText(captionText, 'Caption');
+                                }}
+                                title="Copy Caption"
+                              >
+                                📋
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 

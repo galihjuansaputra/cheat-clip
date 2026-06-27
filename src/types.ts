@@ -11,6 +11,9 @@ export interface ViralClip {
   virality_score: number;
   key_quotes: string[];
   transcript: string;
+  title_suggestion?: string;
+  caption_suggestion?: string;
+  hashtag_suggestion?: string;
 }
 
 export interface AnalyzeResponse {
