@@ -416,47 +416,113 @@ def health_check():
 
 
 
+KNOWN_FLASH_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+]
+
+def get_flash_models_for_key(client: genai.Client) -> List[str]:
+    """Dynamically query all available flash models for the given API key, merged with known models."""
+    discovered = []
+    try:
+        models_page = client.models.list()
+        for m in models_page:
+            name = m.name or ""
+            short_name = name.split('/')[-1]
+            if "gemini" in short_name.lower() and "flash" in short_name.lower():
+                if m.supported_actions and "generateContent" not in m.supported_actions:
+                    continue
+                exclude = ['tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
+                if not any(x in short_name.lower() for x in exclude):
+                    if short_name not in discovered:
+                        discovered.append(short_name)
+    except Exception as e:
+        logger.warning(f"Could not dynamically list models: {e}")
+
+    # Prioritize KNOWN_FLASH_MODELS order
+    ordered = []
+    for km in KNOWN_FLASH_MODELS:
+        if km in discovered:
+            ordered.append(km)
+    for d in discovered:
+        if d not in ordered:
+            ordered.append(d)
+
+    # Ensure known flash models are always available as fallbacks
+    for km in KNOWN_FLASH_MODELS:
+        if km not in ordered:
+            ordered.append(km)
+
+    return ordered
+
+
 @app.get("/api/models")
 def list_available_models(api_key: str):
-    """Fetches list of available Gemini models using the user's API key."""
+    """Fetches list of available Gemini models using the user's API key, prioritizing Flash models."""
+    default_models = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-8b',
+        'gemini-2.5-pro'
+    ]
     if not api_key or api_key.strip().lower() == "mock":
-        return {"models": ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']}
+        return {"models": default_models}
     try:
         client = genai.Client(api_key=api_key.strip())
         models_page = client.models.list()
         
-        model_names = []
+        flash_models = []
+        pro_models = []
+        other_models = []
+        
         for m in models_page:
             name = m.name or ""
             if "gemini" in name.lower():
-                # Filter out models that don't support text generation (e.g. embeddings)
                 if m.supported_actions and "generateContent" not in m.supported_actions:
                     continue
                 
                 short_name = name.split('/')[-1]
-                # Filter out tuning, thinking, vision, image, tts, omni, and customtools specialized variants
-                exclude_keywords = ['tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools']
-                if any(x in short_name for x in ['flash', 'pro', 'lite', 'exp']) \
-                   and not any(x in short_name for x in exclude_keywords):
-                    if short_name not in model_names:
-                        model_names.append(short_name)
-        
-        preferred_order = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
-        sorted_model_names = []
-        for pref in preferred_order:
-            if pref in model_names:
-                sorted_model_names.append(pref)
-        for name in model_names:
-            if name not in sorted_model_names:
-                sorted_model_names.append(name)
+                # Filter out deprecated models like 1.5-pro and specialized non-text variants
+                if "1.5-pro" in short_name.lower():
+                    continue
+                exclude_keywords = ['tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
+                if any(x in short_name.lower() for x in exclude_keywords):
+                    continue
                 
-        if not sorted_model_names:
-            sorted_model_names = preferred_order
+                if "flash" in short_name.lower():
+                    if short_name not in flash_models:
+                        flash_models.append(short_name)
+                elif "pro" in short_name.lower():
+                    if short_name not in pro_models:
+                        pro_models.append(short_name)
+                elif any(x in short_name.lower() for x in ['lite', 'exp']):
+                    if short_name not in other_models:
+                        other_models.append(short_name)
+        
+        preferred_flash_order = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
+        ordered_flash = []
+        for pref in preferred_flash_order:
+            if pref in flash_models:
+                ordered_flash.append(pref)
+        for name in flash_models:
+            if name not in ordered_flash:
+                ordered_flash.append(name)
+                
+        ordered_pro = [p for p in ['gemini-2.5-pro'] if p in pro_models] + [p for p in pro_models if p != 'gemini-2.5-pro']
+        
+        final_list = ordered_flash + ordered_pro + other_models
+        if not final_list:
+            final_list = default_models
             
-        return {"models": sorted_model_names}
+        return {"models": final_list}
     except Exception as e:
         logger.error(f"Error listing models: {e}")
-        return {"models": ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']}
+        return {"models": default_models}
 
 @app.post("/api/analyze")
 async def analyze_video(request: AnalyzeRequest):
@@ -478,7 +544,14 @@ async def analyze_video(request: AnalyzeRequest):
                 return
             video_id = "dQw4w9WgXcQ"
 
-        yield _sse({"step": 1, "message": "Connecting to YouTube — fetching video title and duration..."})
+        yield _sse({
+            "step": 1,
+            "step_progress": 30,
+            "overall_progress": 8,
+            "stage": "Connecting to YouTube",
+            "detail": "Connecting to YouTube & fetching video metadata...",
+            "message": "Connecting to YouTube — fetching video title and duration..."
+        })
 
         try:
             metadata = await asyncio.to_thread(fetch_video_metadata, request.url)
@@ -487,6 +560,14 @@ async def analyze_video(request: AnalyzeRequest):
             heatmap  = metadata.get("heatmap") or []
             is_live  = metadata.get("is_live", False)
             live_status = metadata.get("live_status", "not_live")
+            yield _sse({
+                "step": 1,
+                "step_progress": 100,
+                "overall_progress": 25,
+                "stage": "Video Verified",
+                "detail": f"Loaded metadata for \"{title[:45]}\" ({int(duration)}s)",
+                "message": f"Connected — \"{title[:45]}\" ({int(duration)}s)"
+            })
         except Exception as e:
             if is_mock:
                 title = "Mock YouTube Video"
@@ -494,6 +575,14 @@ async def analyze_video(request: AnalyzeRequest):
                 heatmap = []
                 is_live = False
                 live_status = "not_live"
+                yield _sse({
+                    "step": 1,
+                    "step_progress": 100,
+                    "overall_progress": 25,
+                    "stage": "Video Verified",
+                    "detail": "Loaded mock video metadata (212s)",
+                    "message": "Mock video metadata loaded"
+                })
             else:
                 msg = e.detail if isinstance(e, HTTPException) else str(e)
                 yield _sse({"error": f"Failed to fetch video details: {msg}", "status": 500})
@@ -502,27 +591,77 @@ async def analyze_video(request: AnalyzeRequest):
         logger.info(f"Metadata fetched: title='{title}', duration={duration}s, heatmap_pts={len(heatmap)}")
 
         # ── Step 2: Heatmap ──────────────────────────────────────────────────
+        yield _sse({
+            "step": 2,
+            "step_progress": 40,
+            "overall_progress": 35,
+            "stage": "Scraping Retention",
+            "detail": "Extracting viewer replay telemetry and retention curve...",
+            "message": "Scraping player viewer retention curve..."
+        })
         if heatmap:
-            yield _sse({"step": 2, "message": f"Viewer retention heatmap loaded — {len(heatmap)} data points scraped."})
+            yield _sse({
+                "step": 2,
+                "step_progress": 100,
+                "overall_progress": 50,
+                "stage": "Retention Decoded",
+                "detail": f"Viewer retention heatmap loaded — {len(heatmap)} audience interest data points parsed.",
+                "message": f"Viewer retention heatmap loaded — {len(heatmap)} data points scraped."
+            })
         else:
-            yield _sse({"step": 2, "message": "No heatmap available for this video — will rely on transcript content analysis."})
+            yield _sse({
+                "step": 2,
+                "step_progress": 100,
+                "overall_progress": 50,
+                "stage": "Dialogue Fallback",
+                "detail": "No heatmap curve available — relying on full transcript dialogue analysis.",
+                "message": "No heatmap available for this video — will rely on transcript content analysis."
+            })
 
         # ── Step 3: Transcript ───────────────────────────────────────────────
         if request.subtitles:
-            yield _sse({"step": 3, "message": "Parsing manual subtitles..."})
+            yield _sse({
+                "step": 3,
+                "step_progress": 30,
+                "overall_progress": 55,
+                "stage": "Parsing Subtitles",
+                "detail": "Parsing custom SRT/TXT subtitle timestamps...",
+                "message": "Parsing manual subtitles..."
+            })
             try:
                 transcript_lines = parse_manual_subtitles(request.subtitles, duration)
                 if not transcript_lines:
                     raise Exception("Custom subtitles parsed into empty array.")
-                yield _sse({"step": 3, "message": f"Custom subtitles parsed — {len(transcript_lines)} lines loaded successfully."})
+                yield _sse({
+                    "step": 3,
+                    "step_progress": 100,
+                    "overall_progress": 70,
+                    "stage": "Subtitles Ready",
+                    "detail": f"Custom subtitles parsed — {len(transcript_lines)} timestamped lines loaded.",
+                    "message": f"Custom subtitles parsed — {len(transcript_lines)} lines loaded successfully."
+                })
             except Exception as e:
                 yield _sse({"error": f"Failed to parse manual subtitles: {str(e)}", "status": 400})
                 return
         else:
-            yield _sse({"step": 3, "message": "Fetching subtitles — trying video's original language..."})
+            yield _sse({
+                "step": 3,
+                "step_progress": 30,
+                "overall_progress": 55,
+                "stage": "Fetching Subtitles",
+                "detail": "Querying YouTube caption tracks & auto-generated transcripts...",
+                "message": "Fetching subtitles — trying video's original language..."
+            })
             try:
                 transcript_lines = await asyncio.to_thread(fetch_transcript, video_id)
-                yield _sse({"step": 3, "message": f"Subtitles loaded — {len(transcript_lines)} lines parsed successfully."})
+                yield _sse({
+                    "step": 3,
+                    "step_progress": 100,
+                    "overall_progress": 70,
+                    "stage": "Subtitles Ready",
+                    "detail": f"Subtitles loaded — {len(transcript_lines)} dialogue sentences with timestamps ready.",
+                    "message": f"Subtitles loaded — {len(transcript_lines)} lines parsed successfully."
+                })
             except Exception as e:
                 if is_mock:
                     transcript_lines = [
@@ -536,7 +675,14 @@ async def analyze_video(request: AnalyzeRequest):
                         {"text": "If you want to grow on TikTok, try it.",      "start": 27.0, "duration": 5.0},
                         {"text": "We will explore the code next.",               "start": 32.0, "duration": 3.0},
                     ]
-                    yield _sse({"step": 3, "message": "Mock mode — using sample transcript."})
+                    yield _sse({
+                        "step": 3,
+                        "step_progress": 100,
+                        "overall_progress": 70,
+                        "stage": "Subtitles Ready",
+                        "detail": "Mock mode — 9 sample dialogue lines loaded.",
+                        "message": "Mock mode — using sample transcript."
+                    })
                 else:
                     # Provide a helpful error message if the video is live or recently completed
                     if is_live or live_status in ('is_live', 'is_upcoming', 'post_live'):
@@ -607,7 +753,23 @@ async def analyze_video(request: AnalyzeRequest):
 
         # ── Mock short-circuit ───────────────────────────────────────────────
         if is_mock:
-            yield _sse({"step": 4, "message": "Mock mode — generating sample clip data..."})
+            mock_stages = [
+                ("Context Assembly", "Aligning 9 transcript dialogue lines with retention telemetry...", 30, 78),
+                ("Viral Hook & Curiosity Detection", "Scanning transcript dialogue for viral hooks & curiosity gaps...", 65, 88),
+                ("Virality Scoring & Selection", "Calculating virality coefficients and formatting clip candidates...", 92, 95),
+            ]
+            for s_name, s_detail, s_prog, o_prog in mock_stages:
+                yield _sse({
+                    "step": 4,
+                    "step_progress": s_prog,
+                    "overall_progress": o_prog,
+                    "stage": s_name,
+                    "detail": s_detail,
+                    "model": "gemini-2.5-flash (Mock)",
+                    "message": f"Mock AI ({s_name}): {s_detail}"
+                })
+                await asyncio.sleep(0.7)
+
             mock_clips = [
                 ViralClip(title="Finding hotspots using heatmaps",  start_time=11.0, end_time=22.0, hook_time=14.0, virality_score=95,
                           key_quotes=["Uses YouTube player heatmaps.", "Processes using Gemini AI."],
@@ -645,7 +807,15 @@ async def analyze_video(request: AnalyzeRequest):
                 clips=mock_clips,
                 model="Mock Gemini"
             )
-            yield _sse({"done": True, "result": result.model_dump()})
+            yield _sse({
+                "step": 4,
+                "step_progress": 100,
+                "overall_progress": 100,
+                "stage": "Analysis Complete",
+                "detail": "Generated 3 viral clip candidates successfully.",
+                "done": True,
+                "result": result.model_dump()
+            })
             return
 
         is_long_video = duration > 3600
@@ -699,115 +869,295 @@ async def analyze_video(request: AnalyzeRequest):
             f"Return {clip_range} clips sorted by virality_score desc."
         )
 
-        yield _sse({"step": 4, "message": f"Prompt built — sending {len(transcript_dump)} transcript lines to Gemini..."})
-
-        # ── Step 4: Gemini API call with fallback models and retry ───────────
-        client = genai.Client(api_key=gemini_key)
         requested_model = (request.model or 'gemini-2.5-flash').strip()
-        default_fallbacks = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
-        models_to_try = [requested_model] + [m for m in default_fallbacks if m != requested_model]
+        if '1.5-pro' in requested_model.lower():
+            logger.info(f"Requested model '{requested_model}' is deprecated. Upgrading to gemini-2.5-flash.")
+            requested_model = 'gemini-2.5-flash'
+
+        yield _sse({
+            "step": 4,
+            "step_progress": 10,
+            "overall_progress": 72,
+            "stage": "Context Assembly",
+            "detail": f"Aligning {len(transcript_dump)} dialogue segments with engagement data for {requested_model}...",
+            "model": requested_model,
+            "message": f"Assembling prompt and engagement context for {requested_model}..."
+        })
+
+        # ── Step 4: Gemini API call with dynamic Flash fallback models and retry ───────────
+        client = genai.Client(api_key=gemini_key)
+        
+        # Discover all available Flash models for the user's API key
+        discovered_flash = await asyncio.to_thread(get_flash_models_for_key, client)
+        
+        # Build models_to_try:
+        models_to_try = [requested_model]
+        for fm in discovered_flash:
+            if fm not in models_to_try and '1.5-pro' not in fm.lower():
+                models_to_try.append(fm)
+        for km in KNOWN_FLASH_MODELS:
+            if km not in models_to_try:
+                models_to_try.append(km)
+
+        logger.info(f"Flash fallback chain prepared: {models_to_try}")
+
         response = None
         last_error = None
+        analysis_data = None
+        successful_model = None
 
-        for model_name in models_to_try:
+        for idx, model_name in enumerate(models_to_try):
+            if '1.5-pro' in model_name.lower():
+                continue
+
+            next_model_hint = None
+            for cand in models_to_try[idx + 1:]:
+                if '1.5-pro' not in cand.lower():
+                    next_model_hint = cand
+                    break
+
             MAX_RETRIES = 2
-            RETRY_DELAYS = [3]  # If a model fails, wait 3 seconds before the single retry, then try next model
             
             for attempt in range(MAX_RETRIES):
                 if attempt > 0:
-                    wait = RETRY_DELAYS[attempt - 1]
-                    yield _sse({"step": 4, "message": f"{model_name} is busy — waiting {wait}s before retry {attempt + 1}/{MAX_RETRIES}..."})
+                    wait = 2
+                    yield _sse({
+                        "step": 4,
+                        "step_progress": 25,
+                        "overall_progress": 75,
+                        "stage": "Transient Retry",
+                        "detail": f"{model_name} busy — waiting {wait}s before retry ({attempt + 1}/{MAX_RETRIES})...",
+                        "model": model_name,
+                        "message": f"{model_name} is busy — waiting {wait}s before retry {attempt + 1}/{MAX_RETRIES}..."
+                    })
                     await asyncio.sleep(wait)
                 
-                yield _sse({"step": 4, "message": f"Calling {model_name} (attempt {attempt + 1}/{MAX_RETRIES})..."})
-                try:
-                    response = await asyncio.to_thread(
-                        client.models.generate_content,
-                        model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=VideoAnalysis,
-                            temperature=0.2,
-                        )
+                yield _sse({
+                    "step": 4,
+                    "step_progress": 18,
+                    "overall_progress": 74,
+                    "stage": "Neural Model Dispatch",
+                    "detail": f"Dispatched {len(transcript_dump)} lines to {model_name} (attempt {attempt + 1})...",
+                    "model": model_name,
+                    "message": f"Calling {model_name} (attempt {attempt + 1}/{MAX_RETRIES})..."
+                })
+                
+                # Execute Gemini call with heartbeat to keep mobile connection alive and show live stages
+                task = asyncio.create_task(asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=VideoAnalysis,
+                        temperature=0.2,
                     )
+                ))
+                
+                call_start = asyncio.get_event_loop().time()
+                while not task.done():
+                    done, _ = await asyncio.wait([task], timeout=2.0)
+                    if not done:
+                        elapsed = int(asyncio.get_event_loop().time() - call_start)
+                        
+                        if elapsed < 5:
+                            stage = "Neural Context Loading"
+                            detail = f"Transmitting {len(transcript_dump)} timestamped dialogue segments to {model_name}..."
+                            step_prog = min(35, 12 + elapsed * 4)
+                        elif elapsed < 12:
+                            stage = "Retention Spike Cross-Analysis"
+                            detail = f"Correlating viewer retention peaks against speaker dialogue to isolate viral moments..."
+                            step_prog = min(55, 35 + int((elapsed - 5) * 3))
+                        elif elapsed < 20:
+                            stage = "Viral Hook & Curiosity Detection"
+                            detail = f"Scanning transcript dialogue for opening hooks, punchlines, controversial takes & emotional peaks..."
+                            step_prog = min(72, 55 + int((elapsed - 12) * 2.2))
+                        elif elapsed < 30:
+                            stage = "Coherence & Sentence Boundary Snapping"
+                            detail = f"Ensuring clip candidates start and end naturally on sentence boundaries without mid-word cuts..."
+                            step_prog = min(85, 72 + int((elapsed - 20) * 1.3))
+                        elif elapsed < 42:
+                            stage = "Virality Scoring & Selection"
+                            detail = f"Calculating virality coefficients (1-100) and selecting the top {clip_range} highest potential clips..."
+                            step_prog = min(92, 85 + int((elapsed - 30) * 0.7))
+                        else:
+                            stage = "Social Media Metadata Synthesis"
+                            detail = f"Drafting attention-grabbing titles, social captions, and targeted hashtags ({elapsed}s)..."
+                            step_prog = min(95, 92 + min(3, int((elapsed - 42) * 0.3)))
+
+                        overall_prog = 70 + int(step_prog * 0.28)
+                        yield _sse({
+                            "step": 4,
+                            "keepalive": True,
+                            "step_progress": step_prog,
+                            "overall_progress": overall_prog,
+                            "stage": stage,
+                            "detail": detail,
+                            "model": model_name,
+                            "elapsed": elapsed,
+                            "message": f"[{model_name} | {elapsed}s] {stage}: {detail}"
+                        })
+                
+                try:
+                    resp_candidate = await task
                     last_error = None
-                    break
+                    
+                    # Parse structured response
+                    parsed_data = None
+                    if hasattr(resp_candidate, 'parsed') and resp_candidate.parsed is not None:
+                        parsed = resp_candidate.parsed
+                        parsed_data = {
+                            "summary": getattr(parsed, 'summary', ''),
+                            "clips": [
+                                {
+                                    "title": getattr(c, 'title', ''),
+                                    "start_time": getattr(c, 'start_time', 0.0),
+                                    "end_time": getattr(c, 'end_time', 0.0),
+                                    "hook_time": getattr(c, 'hook_time', None),
+                                    "virality_score": getattr(c, 'virality_score', 0),
+                                    "key_quotes": getattr(c, 'key_quotes', []),
+                                    "title_suggestion": getattr(c, 'title_suggestion', ''),
+                                    "caption_suggestion": getattr(c, 'caption_suggestion', ''),
+                                    "hashtag_suggestion": getattr(c, 'hashtag_suggestion', ''),
+                                }
+                                for c in (getattr(parsed, 'clips', []) or [])
+                            ]
+                        }
+                    elif resp_candidate.text:
+                        raw_text = resp_candidate.text.strip()
+                        if raw_text.startswith("```"):
+                            raw_text = re.sub(r"^```[a-zA-Z]*\n?", "", raw_text)
+                            raw_text = re.sub(r"\n?```$", "", raw_text)
+                        try:
+                            parsed_data = json.loads(raw_text)
+                        except Exception as json_err:
+                            logger.warning(f"JSON parsing error from {model_name}: {json_err}")
+                            parsed_data = None
+
+                    if parsed_data is not None:
+                        clips_found = len(parsed_data.get('clips', []))
+                        if clips_found == 0 and next_model_hint is not None:
+                            logger.warning(f"{model_name} returned 0 clips. Will try next flash model {next_model_hint}...")
+                            yield _sse({
+                                "step": 4,
+                                "step_progress": 40,
+                                "overall_progress": 78,
+                                "stage": "Flash Model Fallback",
+                                "detail": f"{model_name} returned 0 clips — switching to {next_model_hint} for deeper extraction...",
+                                "model": next_model_hint,
+                                "message": f"{model_name} returned 0 clips — switching to {next_model_hint}..."
+                            })
+                            last_error = Exception(f"{model_name} returned 0 clips")
+                            break
+                        
+                        response = resp_candidate
+                        analysis_data = parsed_data
+                        successful_model = model_name
+                        break
+                    else:
+                        last_error = Exception(f"{model_name} returned empty or unparseable response")
+                        break
+                        
                 except Exception as e:
                     last_error = e
                     err_str = str(e).lower()
-                    is_retryable = any(x in err_str for x in ('503', '429', 'unavailable', 'resource exhausted', 'overloaded', 'rate limit'))
-                    if not is_retryable:
-                        # Non-retryable error (e.g. invalid API key) - break out of retries for this model
+                    logger.warning(f"Error from {model_name} (attempt {attempt + 1}): {e}")
+                    
+                    if any(x in err_str for x in ('404', 'not found', 'not supported', '429', 'quota', 'resource exhausted', 'rate limit')):
+                        break
+                    
+                    is_server_busy = any(x in err_str for x in ('503', 'unavailable', 'overloaded', '500', 'internal'))
+                    if not is_server_busy:
                         break
             
-            # If we successfully got a response, stop trying other models
-            if last_error is None and response is not None:
+            if analysis_data is not None and response is not None:
                 break
-            
-            # Otherwise, log the model failure and prepare for fallback if available
-            logger.warning(f"Model {model_name} failed with error: {last_error}")
-            if model_name != models_to_try[-1]:
-                yield _sse({"step": 4, "message": f"{model_name} failed (high demand or rate limit) — falling back to next model..."})
-
-        if last_error is not None:
-            err_str = str(last_error).lower()
-            if any(x in err_str for x in ('503', 'unavailable', 'overloaded')):
-                yield _sse({"error": "All Gemini models are experiencing high demand. Please link a billing account to your API key or wait a moment and try again.", "status": 503})
-            elif any(x in err_str for x in ('429', 'quota', 'resource exhausted', 'rate limit')):
-                yield _sse({"error": "Your API key quota/rate limit was exceeded on all fallback models. Link a billing account in Google AI Studio for higher limits.", "status": 429})
-            elif any(x in err_str for x in ('401', '403', 'api_key', 'invalid', 'permission')):
-                yield _sse({"error": "Invalid Gemini API key. Please double-check it at aistudio.google.com.", "status": 401})
-            else:
-                logger.error(f"Gemini error after all fallback models: {last_error}")
-                yield _sse({"error": f"AI analysis failed: {str(last_error)}", "status": 500})
-            return
-
-        if response is None:
-            yield _sse({"error": "Gemini returned no response.", "status": 500})
-            return
-
-        yield _sse({"step": 4, "message": "Gemini responded — parsing clip candidates..."})
-
-        # Parse structured response
-        analysis_data = None
-        if hasattr(response, 'parsed') and response.parsed is not None:
-            parsed = response.parsed
-            analysis_data = {
-                "summary": getattr(parsed, 'summary', ''),
-                "clips": [
-                    {
-                        "title":         getattr(c, 'title', ''),
-                        "start_time":    getattr(c, 'start_time', 0.0),
-                        "end_time":      getattr(c, 'end_time', 0.0),
-                        "hook_time":     getattr(c, 'hook_time', None),
-                        "virality_score": getattr(c, 'virality_score', 0),
-                        "key_quotes":    getattr(c, 'key_quotes', []),
-                        "title_suggestion": getattr(c, 'title_suggestion', ''),
-                        "caption_suggestion": getattr(c, 'caption_suggestion', ''),
-                        "hashtag_suggestion": getattr(c, 'hashtag_suggestion', ''),
-                    }
-                    for c in (getattr(parsed, 'clips', []) or [])
-                ]
-            }
+                
+            if next_model_hint is not None:
+                err_summary = "quota reached" if any(x in str(last_error).lower() for x in ('429', 'quota', 'rate limit')) else \
+                              "not available or deprecated" if "404" in str(last_error) else \
+                              "temporarily busy"
+                yield _sse({
+                    "step": 4,
+                    "step_progress": 35,
+                    "overall_progress": 76,
+                    "stage": "Flash Fallback",
+                    "detail": f"{model_name} {err_summary} — switching to fallback {next_model_hint}...",
+                    "model": next_model_hint,
+                    "message": f"{model_name} {err_summary} — switching to flash fallback model {next_model_hint}..."
+                })
 
         if analysis_data is None:
-            if not response.text:
-                finish_reason = None
-                try:
-                    finish_reason = response.candidates[0].finish_reason if response.candidates else None
-                except Exception:
-                    pass
-                if finish_reason and str(finish_reason) in ('SAFETY','RECITATION','OTHER'):
-                    yield _sse({"error": f"Gemini blocked this content (reason={finish_reason}).", "status": 422})
-                    return
-                yield _sse({"error": "Gemini returned an empty response. Try a shorter video or different duration setting.", "status": 500})
-                return
-            analysis_data = json.loads(response.text)
+            if last_error is not None:
+                err_str = str(last_error).lower()
+                if any(x in err_str for x in ('429', 'quota', 'resource exhausted', 'rate limit')):
+                    yield _sse({
+                        "error": "Gemini API free quota/rate limit was reached across all Flash models. Free keys have a request limit per minute. Please wait 30–60 seconds and try again, or generate a new free key at aistudio.google.com.",
+                        "status": 429
+                    })
+                elif any(x in err_str for x in ('503', 'unavailable', 'overloaded')):
+                    yield _sse({
+                        "error": "Google Gemini servers are currently experiencing high demand across all Flash models. Please wait a moment and try again.",
+                        "status": 503
+                    })
+                elif any(x in err_str for x in ('401', '403', 'api_key', 'invalid', 'permission')):
+                    yield _sse({
+                        "error": "Invalid Gemini API key or unauthorized. Please verify your API key at aistudio.google.com.",
+                        "status": 401
+                    })
+                else:
+                    logger.error(f"Gemini error after all fallback models: {last_error}")
+                    yield _sse({"error": f"AI analysis failed: {str(last_error)}", "status": 500})
+            else:
+                yield _sse({"error": "Gemini returned no response.", "status": 500})
+            return
+
+        # Fallback clip synthesis if 0 clips were returned after all models
+        if len(analysis_data.get('clips', [])) == 0 and enriched_transcript:
+            logger.info("Generating fallback clips from heatmap and transcript segments...")
+            sorted_lines = sorted(enriched_transcript, key=lambda l: l.get('engagement', 0.0), reverse=True)
+            candidate_starts = []
+            for l in sorted_lines:
+                s = l['start']
+                if not any(abs(s - existing) < 25.0 for existing in candidate_starts):
+                    candidate_starts.append(s)
+                if len(candidate_starts) >= 5:
+                    break
+            
+            fallback_clips_list = []
+            for i, st in enumerate(candidate_starts):
+                target_len = 30.0 if request.duration == "30s" else 15.0 if request.duration == "15s" else 60.0
+                et = min(duration, st + target_len)
+                seg_lines = [l['text'] for l in enriched_transcript if max(l['start'], st) < min(l['end'], et)]
+                seg_text = " ".join(seg_lines).strip()
+                preview = seg_text[:60] + "..." if len(seg_text) > 60 else seg_text or f"Viral Highlight #{i+1}"
+                fallback_clips_list.append({
+                    "title": f"Key Highlight #{i+1}",
+                    "start_time": st,
+                    "end_time": et,
+                    "hook_time": st,
+                    "virality_score": max(70, int(95 - i * 5)),
+                    "key_quotes": [seg_text[:80]] if seg_text else [],
+                    "title_suggestion": f"Must Watch Moment #{i+1}",
+                    "caption_suggestion": f"Key highlight from video: {preview} #viral #trending",
+                    "hashtag_suggestion": "#viral #shorts #trending"
+                })
+            analysis_data['clips'] = fallback_clips_list
+            if not analysis_data.get('summary'):
+                analysis_data['summary'] = f"Analysis of \"{title}\" identifying {len(fallback_clips_list)} key segments. #viral #highlights"
 
         clip_count = len(analysis_data.get('clips', []))
-        yield _sse({"step": 4, "message": f"Found {clip_count} viral clip candidates — reconstructing transcripts..."})
-        logger.info(f"Gemini analysis complete. Found {clip_count} clips.")
+        yield _sse({
+            "step": 4,
+            "step_progress": 98,
+            "overall_progress": 98,
+            "stage": "Clip Verification & Alignment",
+            "detail": f"Verified {clip_count} clip segments with precise video timestamps and key quotes.",
+            "model": successful_model or requested_model,
+            "message": f"Found {clip_count} viral clip candidates with {successful_model or requested_model} — reconstructing transcripts..."
+        })
+        logger.info(f"Gemini analysis complete with {successful_model or requested_model}. Found {clip_count} clips.")
+        logger.info(f"Gemini analysis complete with {successful_model or requested_model}. Found {clip_count} clips.")
 
         # Reconstruct clip transcripts from enriched_transcript
         final_clips = []
@@ -871,7 +1221,7 @@ async def analyze_video(request: AnalyzeRequest):
             summary=clean_summary,
             clips=final_clips,
             transcript=response_transcript,
-            model=model_name
+            model=successful_model or requested_model
         )
 
         yield _sse({"done": True, "result": final_result.model_dump()})

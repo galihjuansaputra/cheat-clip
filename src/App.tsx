@@ -17,7 +17,15 @@ export default function App() {
   const [showApiKey, setShowApiKey] = useState(false);
 
   // AI model selection and custom focus prompt states
-  const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem('cheat_clip_selected_model') || 'gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const saved = localStorage.getItem('cheat_clip_selected_model');
+    // Auto-migrate outdated or 404 models like gemini-1.5-pro to gemini-2.5-flash
+    if (saved && (saved.includes('1.5-pro') || saved === 'gemini-1.5-pro')) {
+      localStorage.setItem('cheat_clip_selected_model', 'gemini-2.5-flash');
+      return 'gemini-2.5-flash';
+    }
+    return saved || 'gemini-2.5-flash';
+  });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [customPrompt, setCustomPrompt] = useState<string>('');
@@ -62,6 +70,30 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
+
+  // Real-time progress and cognitive stage tracking
+  const [stepProgress, setStepProgress] = useState<Record<number, number>>({ 1: 0, 2: 0, 3: 0, 4: 0 });
+  const [overallProgress, setOverallProgress] = useState<number>(0);
+  const [aiStage, setAiStage] = useState<string>('');
+  const [aiDetail, setAiDetail] = useState<string>('');
+  const [activeProcessingModel, setActiveProcessingModel] = useState<string>('');
+  const [loadingElapsedTime, setLoadingElapsedTime] = useState<number>(0);
+
+  // Active timer during loading so the user always sees live activity
+  useEffect(() => {
+    let interval: number | null = null;
+    if (loading) {
+      setLoadingElapsedTime(0);
+      interval = window.setInterval(() => {
+        setLoadingElapsedTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      setLoadingElapsedTime(0);
+    }
+    return () => {
+      if (interval !== null) clearInterval(interval);
+    };
+  }, [loading]);
 
   // Results
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
@@ -166,8 +198,10 @@ export default function App() {
           const data = await res.json();
           if (data.models && data.models.length > 0) {
             setAvailableModels(data.models);
-            if (!data.models.includes(selectedModel) && !['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'].includes(selectedModel)) {
-              setSelectedModel(data.models[0]);
+            if (!data.models.includes(selectedModel) || selectedModel.includes('1.5-pro')) {
+              const fallback = data.models.find((m: string) => m.includes('flash')) || data.models[0] || 'gemini-2.5-flash';
+              setSelectedModel(fallback);
+              localStorage.setItem('cheat_clip_selected_model', fallback);
             }
           }
         }
@@ -311,11 +345,19 @@ export default function App() {
       setResult(null);
       setActiveClip(null);
       setCurrentStep(1);
+      setStepProgress({ 1: 100, 2: 0, 3: 0, 4: 0 });
+      setOverallProgress(25);
       setLoadingDetails('Loading from history...');
       setTimeout(() => {
         setCurrentStep(4);
+        setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 85 });
+        setOverallProgress(90);
+        setAiStage('Restoring Viral Hotspots');
+        setAiDetail('Reconstructing engagement timestamps from saved analysis...');
         setLoadingDetails('Restoring viral hotspots from saved analysis...');
         setTimeout(() => {
+          setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 100 });
+          setOverallProgress(100);
           setResult(data);
           setLoading(false);
           setShowHistory(false);
@@ -323,7 +365,7 @@ export default function App() {
           // Force recreate the player since we destroyed it
           setTimeout(() => initPlayer(data.video_id, true), 150);
         }, 500);
-      }, 800);
+      }, 600);
     } catch (_) {
       setToastMessage('Failed to load this history entry.');
       setTimeout(() => setToastMessage(null), 3000);
@@ -593,19 +635,29 @@ export default function App() {
           setResult(null);
           setActiveClip(null);
           setCurrentStep(1);
+          setStepProgress({ 1: 100, 2: 0, 3: 0, 4: 0 });
+          setOverallProgress(25);
           setLoadingDetails('Checking cache... Found matching clip analysis in memory!');
 
           // Fast progress stepper transitions for cached data (premium responsive feel)
-          await new Promise(r => setTimeout(r, 400));
-          setCurrentStep(2);
-          setLoadingDetails('Loading cached audience interest heatmap points...');
-          await new Promise(r => setTimeout(r, 400));
-          setCurrentStep(3);
-          setLoadingDetails(subtitlesSource === 'manual' ? 'Loading manual subtitles and transcript...' : 'Loading native subtitles and transcript...');
-          await new Promise(r => setTimeout(r, 400));
-          setCurrentStep(4);
-          setLoadingDetails('Reconstructing viral hotspots...');
           await new Promise(r => setTimeout(r, 300));
+          setCurrentStep(2);
+          setStepProgress({ 1: 100, 2: 100, 3: 0, 4: 0 });
+          setOverallProgress(50);
+          setLoadingDetails('Loading cached audience interest heatmap points...');
+          await new Promise(r => setTimeout(r, 300));
+          setCurrentStep(3);
+          setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 0 });
+          setOverallProgress(75);
+          setLoadingDetails(subtitlesSource === 'manual' ? 'Loading manual subtitles and transcript...' : 'Loading native subtitles and transcript...');
+          await new Promise(r => setTimeout(r, 300));
+          setCurrentStep(4);
+          setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 100 });
+          setOverallProgress(100);
+          setAiStage('Restoring Cached Highlights');
+          setAiDetail('Reconstructing engagement timestamps, viral hooks, and social metadata from memory...');
+          setLoadingDetails('Reconstructing viral hotspots...');
+          await new Promise(r => setTimeout(r, 250));
 
           setResult(parsedData);
           setLoading(false);
@@ -632,6 +684,11 @@ export default function App() {
     setResult(null);
     setActiveClip(null);
     setCurrentStep(1);
+    setStepProgress({ 1: 20, 2: 0, 3: 0, 4: 0 });
+    setOverallProgress(5);
+    setAiStage('Initializing Analysis Pipeline');
+    setAiDetail('Connecting to YouTube and resolving media stream metadata...');
+    setActiveProcessingModel(selectedModel);
     setLoadingDetails('Connecting to YouTube...');
 
     let resultData: AnalyzeResponse | null = null;
@@ -680,29 +737,88 @@ export default function App() {
               throw new Error(event.error);
             } else if (event.done) {
               resultData = event.result as AnalyzeResponse;
+              setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 100 });
+              setOverallProgress(100);
               streamDone = true;
               break;
             } else {
-              if (event.step !== undefined) setCurrentStep(event.step);
-              if (event.message) setLoadingDetails(event.message);
+              if (event.step !== undefined) {
+                const s = Number(event.step);
+                setCurrentStep(s);
+                setStepProgress(prev => {
+                  const updated = { ...prev };
+                  for (let prevStep = 1; prevStep < s; prevStep++) {
+                    updated[prevStep] = 100;
+                  }
+                  if (event.step_progress !== undefined) {
+                    updated[s] = Math.max(updated[s] || 0, Number(event.step_progress));
+                  }
+                  return updated;
+                });
+              }
+              if (event.overall_progress !== undefined) {
+                setOverallProgress(Number(event.overall_progress));
+              }
+              if (event.stage) {
+                setAiStage(event.stage);
+              }
+              if (event.detail) {
+                setAiDetail(event.detail);
+              }
+              if (event.model) {
+                setActiveProcessingModel(event.model);
+              }
+              if (event.message) {
+                setLoadingDetails(event.message);
+              }
             }
           }
           if (streamDone) break;
         }
       }
 
-      if (!resultData) throw new Error('Analysis completed but no result was received.');
+      // Flush remaining data in decoder and parse trailing buffer
+      buffer += decoder.decode();
+      if (!resultData && buffer.trim()) {
+        const parts = buffer.split('\n\n');
+        for (const part of parts) {
+          for (const line of part.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const event = JSON.parse(line.slice(6));
+              if (event.error) throw new Error(event.error);
+              if (event.done && event.result) {
+                resultData = event.result as AnalyzeResponse;
+                setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 100 });
+                setOverallProgress(100);
+                break;
+              }
+            } catch (err: any) {
+              if (err.message && !err.message.includes('JSON')) throw err;
+            }
+          }
+          if (resultData) break;
+        }
+      }
 
-      // Cache the successful response
+      if (!resultData) {
+        throw new Error('Connection to the server was closed before analysis completed. On mobile devices, ensure your browser screen stays awake and network is stable, then try again.');
+      }
+
+      // Cache the successful response safely (handling mobile Safari quota limits)
       if (resultData.video_id) {
-        const promptSuffix = customPrompt.trim() ? `_prompt_${customPrompt.trim().replace(/[^a-zA-Z0-9]/g, '_')}` : '';
-        const modelSuffix = `_model_${selectedModel}`;
-        const clipsSuffix = `_clips_${targetClipCount}`;
-        const targetCacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}`;
-        const tsKey = `cheat_clip_ts_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}`;
-        localStorage.setItem(targetCacheKey, JSON.stringify(resultData));
-        localStorage.setItem(tsKey, new Date().toISOString());
-        refreshHistory();
+        try {
+          const promptSuffix = customPrompt.trim() ? `_prompt_${customPrompt.trim().replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+          const modelSuffix = `_model_${selectedModel}`;
+          const clipsSuffix = `_clips_${targetClipCount}`;
+          const targetCacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}`;
+          const tsKey = `cheat_clip_ts_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}`;
+          localStorage.setItem(targetCacheKey, JSON.stringify(resultData));
+          localStorage.setItem(tsKey, new Date().toISOString());
+          refreshHistory();
+        } catch (storageErr) {
+          console.warn('Could not cache analysis to localStorage (likely quota limit on mobile device):', storageErr);
+        }
       }
 
       setResult(resultData);
@@ -710,6 +826,14 @@ export default function App() {
 
       if (resultData.clips?.length > 0) setActiveClip(resultData.clips[0]);
       setTimeout(() => initPlayer(resultData!.video_id), 100);
+
+      // On mobile devices, scroll smoothly to the dashboard so results are immediately visible
+      setTimeout(() => {
+        const dashboard = document.querySelector('.dashboard-grid');
+        if (dashboard && window.innerWidth <= 1024) {
+          dashboard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 250);
 
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred during analysis.');
@@ -1087,15 +1211,16 @@ Transcript:
                     ))
                   ) : (
                     <>
-                      <option value="gemini-2.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-flash (Fast & recommended)</option>
-                      <option value="gemini-2.5-pro" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-pro (Creative & complex)</option>
-                      <option value="gemini-1.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-1.5-flash (Standard)</option>
-                      <option value="gemini-1.5-pro" style={{ background: '#0d1324', color: '#fff' }}>gemini-1.5-pro (Heavy-duty)</option>
+                      <option value="gemini-2.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-flash (Fast & recommended - Free tier friendly)</option>
+                      <option value="gemini-2.0-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash (Fast & responsive)</option>
+                      <option value="gemini-2.0-flash-lite" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash-lite (Ultra-fast & lightweight)</option>
+                      <option value="gemini-1.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-1.5-flash (Standard flash)</option>
+                      <option value="gemini-2.5-pro" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-pro (Creative & complex - High quota)</option>
                     </>
                   )}
                 </select>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4, marginTop: '0.2rem' }}>
-                  💡 <strong>Model Tip:</strong> <strong>gemini-2.5-flash</strong> is fast, efficient, and recommended. If you are using a <strong>free API key</strong>, we recommend <strong>gemini-2.5-flash</strong> to prevent hitting strict free tier quota limits. Select <strong>pro</strong> models only if you have a billing-enabled key for handling complex context.
+                  💡 <strong>Free Tier Resilience:</strong> If a model encounters quota limits or errors, Cheat Clip automatically tries all available Flash models (<strong>gemini-2.5-flash, 2.0-flash, 2.0-flash-lite, 1.5-flash</strong>) until clips are successfully found!
                 </span>
               </div>
             </div>
@@ -1455,50 +1580,174 @@ Transcript:
         </section>
       )}
 
-      {/* Loading Steps state */}
+      {/* Loading Steps state with Real Progress Bars & Cognitive AI Diagnostics */}
       {loading && (
-        <section className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '3rem 2rem' }}>
-          <div style={{ width: '100%', maxWidth: '500px' }}>
-            <h3 style={{ textAlign: 'center', marginBottom: '1.5rem' }} className="text-gradient">Decoding Video Engagement</h3>
+        <section className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '2.5rem 1.75rem' }}>
+          <div style={{ width: '100%', maxWidth: '620px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+              <h3 style={{ marginBottom: '0.4rem', fontSize: '1.4rem' }} className="text-gradient">
+                Decoding Video Engagement
+              </h3>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>
+                Multimodal AI pipeline extracting viral retention spikes and hook sequences
+              </p>
+            </div>
 
+            {/* Master Progress Bar */}
+            <div style={{ marginBottom: '2rem', padding: '0.85rem 1rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Pipeline Overall Completion
+                </span>
+                <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+                  {overallProgress}%
+                </span>
+              </div>
+              <div style={{ height: '7px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    background: 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)',
+                    width: `${overallProgress}%`,
+                    transition: 'width 0.4s ease'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Stepper with Individual Progress Bars */}
             <div className="stepper-container">
+              {/* Step 1 */}
               <div className={`step-item ${currentStep === 1 ? 'active' : currentStep > 1 ? 'completed' : ''}`}>
                 <div className="step-circle">{currentStep > 1 ? '✓' : '1'}</div>
-                <div className="step-label">Extracting URL & YouTube video details</div>
+                <div className="step-content">
+                  <div className="step-header-row">
+                    <span className="step-label">Extracting URL & YouTube video details</span>
+                    <span className="step-percentage">
+                      {currentStep > 1 ? '100%' : `${stepProgress[1] || 0}%`}
+                    </span>
+                  </div>
+                  <div className="step-mini-bar-track">
+                    <div
+                      className="step-mini-bar-fill"
+                      style={{ width: `${currentStep > 1 ? 100 : (stepProgress[1] || 0)}%` }}
+                    />
+                  </div>
+                  {currentStep === 1 && (
+                    <span className="step-subtext">Resolving video stream metadata, duration bounds, and title...</span>
+                  )}
+                </div>
               </div>
+
+              {/* Step 2 */}
               <div className={`step-item ${currentStep === 2 ? 'active' : currentStep > 2 ? 'completed' : ''}`}>
                 <div className="step-circle">{currentStep > 2 ? '✓' : '2'}</div>
-                <div className="step-label">Scraping audience retention heatmap data</div>
+                <div className="step-content">
+                  <div className="step-header-row">
+                    <span className="step-label">Scraping audience retention heatmap data</span>
+                    <span className="step-percentage">
+                      {currentStep > 2 ? '100%' : currentStep === 2 ? `${stepProgress[2] || 0}%` : '0%'}
+                    </span>
+                  </div>
+                  <div className="step-mini-bar-track">
+                    <div
+                      className="step-mini-bar-fill"
+                      style={{ width: `${currentStep > 2 ? 100 : currentStep === 2 ? (stepProgress[2] || 0) : 0}%` }}
+                    />
+                  </div>
+                  {currentStep === 2 && (
+                    <span className="step-subtext">Sampling 100 audience replay points & calculating engagement distribution...</span>
+                  )}
+                </div>
               </div>
+
+              {/* Step 3 */}
               <div className={`step-item ${currentStep === 3 ? 'active' : currentStep > 3 ? 'completed' : ''}`}>
                 <div className="step-circle">{currentStep > 3 ? '✓' : '3'}</div>
-                <div className="step-label">Retrieving subtitles & translating transcript</div>
-              </div>
-              <div className={`step-item ${currentStep === 4 ? 'active' : ''}`}>
-                <div className="step-circle">4</div>
-                <div className="step-label">
-                  AI analysis & viral clip extraction
-                  {currentStep === 4 && (
-                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', fontWeight: 400 }}>
-                      This step can take 30–90 seconds depending on video length
+                <div className="step-content">
+                  <div className="step-header-row">
+                    <span className="step-label">Retrieving subtitles & translating transcript</span>
+                    <span className="step-percentage">
+                      {currentStep > 3 ? '100%' : currentStep === 3 ? `${stepProgress[3] || 0}%` : '0%'}
                     </span>
+                  </div>
+                  <div className="step-mini-bar-track">
+                    <div
+                      className="step-mini-bar-fill"
+                      style={{ width: `${currentStep > 3 ? 100 : currentStep === 3 ? (stepProgress[3] || 0) : 0}%` }}
+                    />
+                  </div>
+                  {currentStep === 3 && (
+                    <span className="step-subtext">Aligning dialogue timestamps and sentences for precise audio cut boundaries...</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className={`step-item ${currentStep === 4 ? 'active' : ''}`}>
+                <div className="step-circle">{currentStep > 4 ? '✓' : '4'}</div>
+                <div className="step-content">
+                  <div className="step-header-row">
+                    <span className="step-label">AI analysis & viral clip extraction</span>
+                    <span className="step-percentage">
+                      {currentStep === 4 ? `${stepProgress[4] || 0}%` : '0%'}
+                    </span>
+                  </div>
+                  <div className="step-mini-bar-track">
+                    <div
+                      className="step-mini-bar-fill"
+                      style={{ width: `${currentStep === 4 ? (stepProgress[4] || 0) : 0}%` }}
+                    />
+                  </div>
+
+                  {currentStep === 4 && (
+                    <div className="ai-activity-card">
+                      <div className="ai-activity-topbar">
+                        <div className="ai-engine-badge">
+                          <span style={{ fontSize: '0.85rem' }}>⚡</span>
+                          <span>AI Cognitive Engine</span>
+                          {activeProcessingModel && (
+                            <span style={{ opacity: 0.85, fontWeight: 500 }}>({activeProcessingModel})</span>
+                          )}
+                        </div>
+                        <div className="ai-timer-badge">
+                          <span>⏱️ {loadingElapsedTime}s elapsed</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="ai-stage-title">
+                          <span style={{ animation: 'spin 2.5s linear infinite', display: 'inline-block' }}>🧠</span>
+                          <span>{aiStage || 'Synthesizing Viral Highlights'}</span>
+                        </div>
+                      </div>
+
+                      <div className="ai-stage-detail">
+                        {aiDetail || loadingDetails || 'Evaluating audience drop-off gradients and sentence coherence...'}
+                      </div>
+
+                      {/* 4 Micro-phase progress pills */}
+                      <div className="ai-subphases-row">
+                        <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 25 ? 'completed' : (stepProgress[4] || 0) >= 5 ? 'active' : ''}`}>
+                          1. Heatmap Peaks
+                        </div>
+                        <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 55 ? 'completed' : (stepProgress[4] || 0) >= 25 ? 'active' : ''}`}>
+                          2. Hook Extraction
+                        </div>
+                        <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 80 ? 'completed' : (stepProgress[4] || 0) >= 55 ? 'active' : ''}`}>
+                          3. Virality Scoring
+                        </div>
+                        <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 95 ? 'completed' : (stepProgress[4] || 0) >= 80 ? 'active' : ''}`}>
+                          4. Social Metadata
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
             </div>
 
-            <div style={{ marginTop: '2.5rem', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
-              <div
-                style={{
-                  height: '100%',
-                  background: 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)',
-                  width: `${(currentStep / 4) * 100}%`,
-                  transition: 'width 0.5s ease'
-                }}
-              ></div>
-            </div>
-
-            <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)', minHeight: '2.5rem' }}>
+            <div style={{ marginTop: '1.75rem', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
               <span className="pulsing-text">⚙️ {loadingDetails}</span>
             </div>
           </div>
