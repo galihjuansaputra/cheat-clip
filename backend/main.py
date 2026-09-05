@@ -28,6 +28,19 @@ from google.genai import types
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cheat-clip")
 
+# ----------------------------------------------------------------
+# Proxy Configuration: Isolated strictly to transcripts
+# ----------------------------------------------------------------
+# To prevent slow network latency on Gemini AI calls, SSE streams,
+# and metadata fetching, we isolate any configured proxy so that
+# ONLY YouTube transcript extraction routes through it.
+TRANSCRIPT_PROXY = os.environ.get("TRANSCRIPT_PROXY") or os.environ.get("YOUTUBE_PROXY")
+for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+    if _k in os.environ:
+        if not TRANSCRIPT_PROXY:
+            TRANSCRIPT_PROXY = os.environ[_k]
+        del os.environ[_k]
+
 app = FastAPI(title="CHEAT CLIP API", description="AI-powered YouTube Viral Hotspot Finder")
 
 # Configure CORS
@@ -256,17 +269,15 @@ def extract_video_id(url: str) -> Optional[str]:
     return None
 
 def fetch_video_metadata(url: str):
-    """Fetches video title, duration, and viewer retention heatmap using yt-dlp."""
-    proxy_url = os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+    """Fetches video title, duration, and viewer retention heatmap using yt-dlp (runs direct, no proxy)."""
     ydl_opts = {
         'skip_download': True,
         'youtube_include_dash_manifest': False,
         'quiet': True,
         'no_warnings': True,
-        'nocheckcertificate': True
+        'nocheckcertificate': True,
+        'proxy': None
     }
-    if proxy_url:
-        ydl_opts['proxy'] = proxy_url
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
@@ -296,7 +307,7 @@ def fetch_video_metadata(url: str):
 
 
 def fetch_transcript(video_id: str) -> List[dict]:
-    """Retrieves subtitles with multiple fallback strategies."""
+    """Retrieves subtitles with multiple fallback strategies, routing through a proxy if configured."""
 
     def to_dict_list(fetched) -> List[dict]:
         return [
@@ -308,16 +319,19 @@ def fetch_transcript(video_id: str) -> List[dict]:
             for line in fetched
         ]
 
-    proxy_url = os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+    # Dedicated proxy specifically for transcript retrieval (keeps Gemini, SSE, and metadata fast)
+    proxy_url = TRANSCRIPT_PROXY or os.environ.get("TRANSCRIPT_PROXY") or os.environ.get("YOUTUBE_PROXY")
     if proxy_url:
         import requests
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         session = requests.Session()
+        session.trust_env = False  # Ignore ambient OS/system proxies
         session.proxies = {"http": proxy_url, "https": proxy_url}
         session.verify = False
         api = YouTubeTranscriptApi(http_client=session)
+        logger.info("Using dedicated proxy for transcript retrieval")
     else:
         api = YouTubeTranscriptApi()
 
