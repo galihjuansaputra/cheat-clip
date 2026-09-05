@@ -306,7 +306,10 @@ _supadata_key_index = 0
 def get_supadata_keys() -> List[str]:
     """Retrieves list of Supadata API keys from environment variables."""
     raw = os.environ.get("SUPADATA_API_KEYS") or os.environ.get("SUPADATA_API_KEY") or ""
-    keys = [k.strip() for k in re.split(r'[,\s\n]+', raw) if k.strip()]
+    # Extract keys starting with sd_ or split by comma/whitespace/quotes
+    keys = re.findall(r'sd_[a-zA-Z0-9]+', raw)
+    if not keys:
+        keys = [k.strip('\"\' ') for k in re.split(r'[,\s\n]+', raw) if k.strip('\"\' ')]
     return keys
 
 def fetch_transcript_supadata(video_id: str) -> List[dict]:
@@ -386,7 +389,7 @@ def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
                     formats = lang_dict.get(lang) or []
                     json3_entry = next((f['url'] for f in formats if f.get('ext') == 'json3'), None)
                     if json3_entry:
-                        r = requests.get(json3_entry, timeout=8)
+                        r = requests.get(json3_entry, timeout=5)
                         if r.status_code == 200:
                             events = r.json().get('events', [])
                             result = []
@@ -406,8 +409,8 @@ def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
 
 
 def fetch_transcript(video_id: str) -> List[dict]:
-    """Retrieves subtitles. Tries free direct methods first (youtube-transcript-api, yt-dlp),
-    and only falls back to Supadata as an optional fallback when direct methods fail."""
+    """Retrieves subtitles. On Vercel / serverless cloud environments, prioritizes rotating Supadata
+    to avoid datacenter IP bans and 10s execution timeouts. Locally, prioritizes free direct fetch."""
 
     def to_dict_list(fetched) -> List[dict]:
         return [
@@ -419,20 +422,31 @@ def fetch_transcript(video_id: str) -> List[dict]:
             for line in fetched
         ]
 
-    api = YouTubeTranscriptApi()
+    keys = get_supadata_keys()
+    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
 
-    # ── Strategy 1: direct fetch by language priority (free, local/residential) ──
+    # ── On Vercel / Serverless: Use Supadata First if Available ──────────────
+    # YouTube strictly blocks all Vercel/AWS datacenter IPs. Trying multiple scraping
+    # attempts on Vercel burns 20+ seconds and triggers Vercel Gateway Timeouts.
+    if is_vercel and keys:
+        logger.info("Vercel deployment detected — utilizing Supadata API for cloud transcript retrieval")
+        supadata_data = fetch_transcript_supadata(video_id)
+        if supadata_data:
+            return supadata_data
+
+    # ── Strategy 1: Fast direct fetch (works on localhost/residential IPs) ─────
     priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'ar', 'hi', 'ru']
-    for lang in priority_langs:
-        try:
-            data = to_dict_list(api.fetch(video_id, languages=[lang]))
-            if data:
-                logger.info(f"Transcript fetched via direct fetch (lang={lang})")
-                return data
-        except Exception:
-            continue
+    api = YouTubeTranscriptApi()
+    try:
+        # Pass all priority languages in ONE single network request (fast!)
+        data = to_dict_list(api.fetch(video_id, languages=priority_langs))
+        if data:
+            logger.info("Transcript fetched via direct YouTube fetch")
+            return data
+    except Exception as e:
+        logger.info(f"Direct fetch missed: {e}")
 
-    # ── Strategy 2: list all and try manual transcripts first (free) ──────────
+    # ── Strategy 2: List all transcripts (manual then auto) ────────────────────
     try:
         all_transcripts = list(api.list(video_id))
         manual    = [t for t in all_transcripts if not getattr(t, 'is_generated', False)]
@@ -453,15 +467,16 @@ def fetch_transcript(video_id: str) -> List[dict]:
     except Exception as e:
         logger.warning(f"Could not list transcripts: {e}")
 
-    # ── Strategy 3: yt-dlp native extraction (free, saves Supadata quota) ─────
+    # ── Strategy 3: yt-dlp native extraction fallback ──────────────────────────
     ytdlp_data = fetch_transcript_ytdlp(video_id)
     if ytdlp_data:
         return ytdlp_data
 
-    # ── Strategy 4: Optional Supadata API fallback (runs only if free methods fail) ──
-    supadata_data = fetch_transcript_supadata(video_id)
-    if supadata_data:
-        return supadata_data
+    # ── Strategy 4: Supadata API fallback (for localhost when direct fails) ────
+    if keys:
+        supadata_data = fetch_transcript_supadata(video_id)
+        if supadata_data:
+            return supadata_data
 
     # ── All strategies exhausted ──────────────────────────────────────────────
     raise HTTPException(
