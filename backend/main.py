@@ -306,6 +306,153 @@ def fetch_video_metadata(url: str):
             raise HTTPException(status_code=400, detail=f"Failed to retrieve YouTube video details: {str(e)}")
 
 
+def parse_webvtt_transcript(vtt_text: str) -> List[dict]:
+    """Parses standard WebVTT caption text into cheat-clip transcript segment dictionaries."""
+    def to_seconds(t_str: str) -> float:
+        parts = t_str.strip().split(':')
+        if len(parts) == 3:
+            h, m, s = parts
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        elif len(parts) == 2:
+            m, s = parts
+            return int(m) * 60 + float(s)
+        return 0.0
+
+    lines = vtt_text.splitlines()
+    entries = []
+    i = 0
+    time_re = re.compile(r'(\d+:\d+(?::\d+)?(?:\.\d+)?)\s*-->\s*(\d+:\d+(?::\d+)?(?:\.\d+)?)')
+    while i < len(lines):
+        line = lines[i].strip()
+        m = time_re.search(line)
+        if m:
+            start = to_seconds(m.group(1))
+            end = to_seconds(m.group(2))
+            dur = max(0.0, round(end - start, 3))
+            i += 1
+            text_lines = []
+            while i < len(lines) and lines[i].strip() and not time_re.search(lines[i]):
+                text_lines.append(lines[i].strip())
+                i += 1
+            text = ' '.join(text_lines)
+            # Remove any formatting tags (e.g., <c>, </c>)
+            text = re.sub(r'<[^>]+>', '', text).strip()
+            if text:
+                entries.append({'text': text, 'start': start, 'duration': dur})
+        else:
+            i += 1
+    return entries
+
+
+def fetch_transcript_invidious(video_id: str) -> List[dict]:
+    """Fallback Strategy: Attempts to retrieve subtitles from public Invidious instances without a proxy."""
+    import requests
+    
+    custom_inst = os.environ.get("INVIDIOUS_INSTANCE")
+    instances = [
+        custom_inst.rstrip('/') if custom_inst else None,
+        "https://inv.nadeko.net",
+        "https://invidious.nerdvpn.de",
+        "https://invidious.f5.si",
+        "https://invidious.tiekoetter.com",
+        "https://invidious.projectsegfau.lt"
+    ]
+    instances = [inst for inst in instances if inst]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+
+    priority_langs = ['en', 'id', 'es', 'pt', 'fr', 'de', 'ja', 'ko']
+
+    for inst in instances:
+        try:
+            logger.info(f"Attempting Invidious subtitle fetch via: {inst}")
+            r = requests.get(f"{inst}/api/v1/captions/{video_id}", headers=headers, timeout=5)
+            if r.status_code != 200:
+                continue
+            
+            data = r.json()
+            captions = data.get("captions", [])
+            if not captions:
+                continue
+
+            selected_url = None
+            for plang in priority_langs:
+                # Prefer manual captions first
+                match = next((c for c in captions if c.get("languageCode") == plang and "auto" not in c.get("label", "").lower()), None)
+                if not match:
+                    match = next((c for c in captions if c.get("languageCode") == plang), None)
+                if match and match.get("url"):
+                    selected_url = match["url"]
+                    break
+            
+            if not selected_url and captions and captions[0].get("url"):
+                selected_url = captions[0]["url"]
+
+            if not selected_url:
+                continue
+
+            caption_fetch_url = selected_url if selected_url.startswith("http") else f"{inst}{selected_url}"
+            cap_res = requests.get(caption_fetch_url, headers=headers, timeout=6)
+            if cap_res.status_code == 200 and len(cap_res.text.strip()) > 50:
+                parsed = parse_webvtt_transcript(cap_res.text)
+                if parsed:
+                    logger.info(f"Successfully retrieved transcript via Invidious ({inst})")
+                    return parsed
+        except Exception as e:
+            logger.warning(f"Invidious instance ({inst}) failed: {e}")
+            continue
+
+    return []
+
+
+def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
+    """Fallback Strategy: Attempts to extract captions using yt-dlp's player response without a proxy."""
+    import requests
+    ydl_opts = {
+        'skip_download': True,
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'proxy': None
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            if not info:
+                return []
+            
+            subtitles = info.get('subtitles') or {}
+            auto_subtitles = info.get('automatic_captions') or {}
+            
+            priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko']
+            # Search manual first, then automatic captions
+            for lang_dict, is_auto in [(subtitles, False), (auto_subtitles, True)]:
+                for lang in priority_langs:
+                    formats = lang_dict.get(lang) or []
+                    json3_entry = next((f['url'] for f in formats if f.get('ext') == 'json3'), None)
+                    if json3_entry:
+                        r = requests.get(json3_entry, timeout=8)
+                        if r.status_code == 200:
+                            events = r.json().get('events', [])
+                            result = []
+                            for ev in events:
+                                segs = ev.get('segs', [])
+                                text = ''.join(s.get('utf8', '') for s in segs).strip()
+                                if text:
+                                    start = ev.get('tStartMs', 0) / 1000.0
+                                    dur = ev.get('dDurationMs', 0) / 1000.0
+                                    result.append({'text': text, 'start': start, 'duration': dur})
+                            if result:
+                                logger.info(f"Transcript fetched via yt-dlp fallback (lang={lang}, auto={is_auto})")
+                                return result
+    except Exception as e:
+        logger.warning(f"yt-dlp subtitle fallback failed: {e}")
+    return []
+
+
 def fetch_transcript(video_id: str) -> List[dict]:
     """Retrieves subtitles with multiple fallback strategies, routing through a proxy if configured."""
 
@@ -366,6 +513,16 @@ def fetch_transcript(video_id: str) -> List[dict]:
                 continue
     except Exception as e:
         logger.warning(f"Could not list transcripts: {e}")
+
+    # ── Strategy 3: Invidious Instances Fallback (No Proxy) ───────────────────
+    invidious_data = fetch_transcript_invidious(video_id)
+    if invidious_data:
+        return invidious_data
+
+    # ── Strategy 4: yt-dlp Native Extraction Fallback (No Proxy) ──────────────
+    ytdlp_data = fetch_transcript_ytdlp(video_id)
+    if ytdlp_data:
+        return ytdlp_data
 
     # ── All strategies exhausted ──────────────────────────────────────────────
     raise HTTPException(
