@@ -263,53 +263,82 @@ def extract_video_id(url: str) -> Optional[str]:
         return url.strip()
     return None
 
+DEFAULT_SUPADATA_KEYS = [
+    "sd_d956e6c3346393f13b905eeb98255d6f",
+    "sd_b822c04e45b1e4b2080258ba9076a573",
+    "sd_dfabdc1e2b66e3e4f9dcc25435302555",
+    "sd_5d9892b4db205f0ed22421a9b0acbdfa",
+    "sd_0819745b50a9ec8fab515162fb36fc42",
+    "sd_cf34541e0f4ca45e50d240497e613430",
+    "sd_8c1a945d50a579a82e75ae57292a6e51",
+    "sd_96bbeb05c5cf4b1bc358d67c9913bccf",
+    "sd_2db1a622aaf1c5bcd2bb3cec15aa7990",
+]
+
+DEFAULT_PROXY_URL = "http://kohhwomf-rotate:k0ta9ku4voyw@p.webshare.io:80"
+
+def get_proxy_url() -> Optional[str]:
+    """Retrieves proxy URL from environment variables, or falls back to Webshare rotating endpoint."""
+    return os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXY") or DEFAULT_PROXY_URL
+
 def fetch_video_metadata(url: str):
-    """Fetches video title, duration, and viewer retention heatmap using yt-dlp (runs direct, no proxy)."""
-    ydl_opts = {
-        'skip_download': True,
-        'youtube_include_dash_manifest': False,
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'proxy': None
-    }
+    """Fetches video title, duration, and viewer retention heatmap using yt-dlp."""
+    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    proxy = get_proxy_url()
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    # On Vercel, YouTube blocks direct datacenter IPs, so try proxy first; locally try direct first
+    attempts = [proxy, None] if (is_vercel and proxy) else [None, proxy] if proxy else [None]
+    
+    for attempt_proxy in attempts:
+        ydl_opts = {
+            'skip_download': True,
+            'youtube_include_dash_manifest': False,
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'proxy': attempt_proxy,
+            'socket_timeout': 10
+        }
         try:
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                raise Exception("yt-dlp returned empty info dict")
-            return {
-                "title": info.get('title') or 'Unknown YouTube Video',
-                "duration": float(info.get('duration') or 0.0),
-                "heatmap": info.get('heatmap') or [],
-                "is_live": bool(info.get('is_live') or False),
-                "live_status": info.get('live_status') or 'not_live'
-            }
-        except Exception as e:
-            logger.error(f"Error extracting metadata with yt-dlp: {e}")
-            # Try parsing from video URL ID fallback
-            video_id = extract_video_id(url)
-            if video_id:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    raise Exception("yt-dlp returned empty info dict")
                 return {
-                    "title": f"YouTube Video ({video_id})",
-                    "duration": 0.0,
-                    "heatmap": [],
-                    "is_live": False,
-                    "live_status": "not_live"
+                    "title": info.get('title') or 'Unknown YouTube Video',
+                    "duration": float(info.get('duration') or 0.0),
+                    "heatmap": info.get('heatmap') or [],
+                    "is_live": bool(info.get('is_live') or False),
+                    "live_status": info.get('live_status') or 'not_live'
                 }
-            raise HTTPException(status_code=400, detail=f"Failed to retrieve YouTube video details: {str(e)}")
+        except Exception as e:
+            logger.warning(f"yt-dlp metadata extraction failed (proxy={'yes' if attempt_proxy else 'no'}): {e}")
+            continue
+
+    # Fallback to URL video ID parsing if yt-dlp fails
+    video_id = extract_video_id(url)
+    if video_id:
+        return {
+            "title": f"YouTube Video ({video_id})",
+            "duration": 0.0,
+            "heatmap": [],
+            "is_live": False,
+            "live_status": "not_live"
+        }
+    raise HTTPException(status_code=400, detail="Failed to retrieve YouTube video details from URL.")
 
 
 _supadata_key_index = 0
 
 def get_supadata_keys() -> List[str]:
-    """Retrieves list of Supadata API keys from environment variables."""
+    """Retrieves list of Supadata API keys from environment variables or default fallback."""
     raw = os.environ.get("SUPADATA_API_KEYS") or os.environ.get("SUPADATA_API_KEY") or ""
     # Extract keys starting with sd_ or split by comma/whitespace/quotes
     keys = re.findall(r'sd_[a-zA-Z0-9]+', raw)
     if not keys:
         keys = [k.strip('\"\' ') for k in re.split(r'[,\s\n]+', raw) if k.strip('\"\' ')]
+    if not keys:
+        keys = list(DEFAULT_SUPADATA_KEYS)
     return keys
 
 def fetch_transcript_supadata(video_id: str) -> List[dict]:
@@ -334,7 +363,7 @@ def fetch_transcript_supadata(video_id: str) -> List[dict]:
                 "https://api.supadata.ai/v1/youtube/transcript",
                 headers={"x-api-key": key},
                 params={"videoId": video_id},
-                timeout=12
+                timeout=25
             )
             if response.status_code == 200:
                 data = response.json()
@@ -365,13 +394,14 @@ def fetch_transcript_supadata(video_id: str) -> List[dict]:
 def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
     """Attempts to extract captions using yt-dlp's player response directly (free, no quota used)."""
     import requests
+    proxy = get_proxy_url()
     ydl_opts = {
         'skip_download': True,
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'proxy': None,
-        'socket_timeout': 5
+        'proxy': proxy,
+        'socket_timeout': 8
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -389,20 +419,26 @@ def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
                     formats = lang_dict.get(lang) or []
                     json3_entry = next((f['url'] for f in formats if f.get('ext') == 'json3'), None)
                     if json3_entry:
-                        r = requests.get(json3_entry, timeout=5)
-                        if r.status_code == 200:
-                            events = r.json().get('events', [])
-                            result = []
-                            for ev in events:
-                                segs = ev.get('segs', [])
-                                text = ''.join(s.get('utf8', '') for s in segs).strip()
-                                if text:
-                                    start = ev.get('tStartMs', 0) / 1000.0
-                                    dur = ev.get('dDurationMs', 0) / 1000.0
-                                    result.append({'text': text, 'start': start, 'duration': dur})
-                            if result:
-                                logger.info(f"Transcript fetched via yt-dlp (lang={lang}, auto={is_auto})")
-                                return result
+                        # Try direct first, then proxy if needed
+                        proxies_dict = {'http': proxy, 'https': proxy} if proxy else None
+                        for p in [None, proxies_dict]:
+                            try:
+                                r = requests.get(json3_entry, proxies=p, timeout=5)
+                                if r.status_code == 200:
+                                    events = r.json().get('events', [])
+                                    result = []
+                                    for ev in events:
+                                        segs = ev.get('segs', [])
+                                        text = ''.join(s.get('utf8', '') for s in segs).strip()
+                                        if text:
+                                            start = ev.get('tStartMs', 0) / 1000.0
+                                            dur = ev.get('dDurationMs', 0) / 1000.0
+                                            result.append({'text': text, 'start': start, 'duration': dur})
+                                    if result:
+                                        logger.info(f"Transcript fetched via yt-dlp (lang={lang}, auto={is_auto})")
+                                        return result
+                            except Exception:
+                                continue
     except Exception as e:
         logger.warning(f"yt-dlp subtitle extraction failed: {e}")
     return []
@@ -537,7 +573,18 @@ def _sse(data: dict) -> str:
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "message": "CHEAT CLIP API is active"}
+    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    keys = get_supadata_keys()
+    proxy = get_proxy_url()
+    has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
+    return {
+        "status": "ok",
+        "message": "CHEAT CLIP API is active",
+        "is_vercel": is_vercel,
+        "supadata_keys_count": len(keys),
+        "proxy_configured": bool(proxy),
+        "gemini_env_configured": has_gemini
+    }
 
 
 
@@ -585,7 +632,7 @@ def get_flash_models_for_key(client: genai.Client) -> List[str]:
 
 
 @app.get("/api/models")
-def list_available_models(api_key: str):
+def list_available_models(api_key: str = ""):
     """Fetches list of available Gemini models using the user's API key, prioritizing Flash models."""
     default_models = [
         'gemini-2.5-flash',
@@ -595,10 +642,11 @@ def list_available_models(api_key: str):
         'gemini-1.5-flash-8b',
         'gemini-2.5-pro'
     ]
-    if not api_key or api_key.strip().lower() == "mock":
+    key_to_use = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not key_to_use or key_to_use.lower() == "mock":
         return {"models": default_models}
     try:
-        client = genai.Client(api_key=api_key.strip())
+        client = genai.Client(api_key=key_to_use)
         models_page = client.models.list()
         
         flash_models = []
@@ -654,7 +702,7 @@ async def analyze_video(request: AnalyzeRequest):
     """Stream real-time progress via Server-Sent Events, then deliver the final result."""
 
     async def stream():
-        gemini_key = (request.api_key or '').strip()
+        gemini_key = (request.api_key or os.environ.get("GEMINI_API_KEY") or '').strip()
         is_mock = gemini_key.lower() == "mock"
 
         if not gemini_key:
