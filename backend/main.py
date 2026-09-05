@@ -351,8 +351,54 @@ def fetch_transcript_supadata(video_id: str) -> List[dict]:
     return []
 
 
+def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
+    """Attempts to extract captions using yt-dlp's player response directly (free, no quota used)."""
+    import requests
+    ydl_opts = {
+        'skip_download': True,
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'proxy': None
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            if not info:
+                return []
+            
+            subtitles = info.get('subtitles') or {}
+            auto_subtitles = info.get('automatic_captions') or {}
+            
+            priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'ar', 'hi', 'ru']
+            # Search manual first, then automatic captions
+            for lang_dict, is_auto in [(subtitles, False), (auto_subtitles, True)]:
+                for lang in priority_langs:
+                    formats = lang_dict.get(lang) or []
+                    json3_entry = next((f['url'] for f in formats if f.get('ext') == 'json3'), None)
+                    if json3_entry:
+                        r = requests.get(json3_entry, timeout=8)
+                        if r.status_code == 200:
+                            events = r.json().get('events', [])
+                            result = []
+                            for ev in events:
+                                segs = ev.get('segs', [])
+                                text = ''.join(s.get('utf8', '') for s in segs).strip()
+                                if text:
+                                    start = ev.get('tStartMs', 0) / 1000.0
+                                    dur = ev.get('dDurationMs', 0) / 1000.0
+                                    result.append({'text': text, 'start': start, 'duration': dur})
+                            if result:
+                                logger.info(f"Transcript fetched via yt-dlp (lang={lang}, auto={is_auto})")
+                                return result
+    except Exception as e:
+        logger.warning(f"yt-dlp subtitle extraction failed: {e}")
+    return []
+
+
 def fetch_transcript(video_id: str) -> List[dict]:
-    """Retrieves subtitles, prioritizing direct YouTube fetch and falling back to rotating Supadata API."""
+    """Retrieves subtitles. Tries free direct methods first (youtube-transcript-api, yt-dlp),
+    and only falls back to Supadata as an optional fallback when direct methods fail."""
 
     def to_dict_list(fetched) -> List[dict]:
         return [
@@ -366,7 +412,7 @@ def fetch_transcript(video_id: str) -> List[dict]:
 
     api = YouTubeTranscriptApi()
 
-    # ── Strategy 1: direct fetch by language priority (works on localhost/residential) ──
+    # ── Strategy 1: direct fetch by language priority (free, local/residential) ──
     priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'ar', 'hi', 'ru']
     for lang in priority_langs:
         try:
@@ -377,7 +423,7 @@ def fetch_transcript(video_id: str) -> List[dict]:
         except Exception:
             continue
 
-    # ── Strategy 2: list all and try manual transcripts first ─────────────────
+    # ── Strategy 2: list all and try manual transcripts first (free) ──────────
     try:
         all_transcripts = list(api.list(video_id))
         manual    = [t for t in all_transcripts if not getattr(t, 'is_generated', False)]
@@ -398,7 +444,12 @@ def fetch_transcript(video_id: str) -> List[dict]:
     except Exception as e:
         logger.warning(f"Could not list transcripts: {e}")
 
-    # ── Strategy 3: Rotating Supadata API (Bypasses Vercel/datacenter IP blocks) ───
+    # ── Strategy 3: yt-dlp native extraction (free, saves Supadata quota) ─────
+    ytdlp_data = fetch_transcript_ytdlp(video_id)
+    if ytdlp_data:
+        return ytdlp_data
+
+    # ── Strategy 4: Optional Supadata API fallback (runs only if free methods fail) ──
     supadata_data = fetch_transcript_supadata(video_id)
     if supadata_data:
         return supadata_data
