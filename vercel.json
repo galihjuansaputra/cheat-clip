@@ -1,17 +1,9 @@
 {
   "version": 2,
-  "functions": {
-    "backend/main.py": {
-      "maxDuration": 60
-    }
-  },
   "builds": [
     {
       "src": "backend/main.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxDuration": 60
-      }
+      "use": "@vercel/python"
     },
     {
       "src": "package.json",
