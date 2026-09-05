@@ -11,6 +11,14 @@ if not hasattr(os, 'uname'):
     UnameResult = namedtuple('UnameResult', ['sysname', 'nodename', 'release', 'version', 'machine'])
     os.uname = lambda: UnameResult('Windows', 'localhost', '10', '10.0', 'AMD64')
 
+from dotenv import load_dotenv
+
+# Automatically load environment variables from backend/.env or root .env
+_base_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_base_dir, ".env"))
+load_dotenv(os.path.join(_base_dir, "..", ".env"))
+load_dotenv()
+
 import re
 import logging
 import asyncio
@@ -359,7 +367,8 @@ def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'proxy': None
+        'proxy': None,
+        'socket_timeout': 5
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
