@@ -263,30 +263,17 @@ def extract_video_id(url: str) -> Optional[str]:
         return url.strip()
     return None
 
-DEFAULT_SUPADATA_KEYS = [
-    "sd_d956e6c3346393f13b905eeb98255d6f",
-    "sd_b822c04e45b1e4b2080258ba9076a573",
-    "sd_dfabdc1e2b66e3e4f9dcc25435302555",
-    "sd_5d9892b4db205f0ed22421a9b0acbdfa",
-    "sd_0819745b50a9ec8fab515162fb36fc42",
-    "sd_cf34541e0f4ca45e50d240497e613430",
-    "sd_8c1a945d50a579a82e75ae57292a6e51",
-    "sd_96bbeb05c5cf4b1bc358d67c9913bccf",
-    "sd_2db1a622aaf1c5bcd2bb3cec15aa7990",
-]
-
-DEFAULT_PROXY_URL = "http://kohhwomf-rotate:k0ta9ku4voyw@p.webshare.io:80"
-
 def get_proxy_url() -> Optional[str]:
-    """Retrieves proxy URL from environment variables, or falls back to Webshare rotating endpoint."""
-    return os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXY") or DEFAULT_PROXY_URL
+    """Retrieves proxy URL from environment variables (PROXY_URL or WEBSHARE_PROXY)."""
+    proxy = os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXY") or ""
+    return proxy.strip() or None
 
 def fetch_video_metadata(url: str):
     """Fetches video title, duration, and viewer retention heatmap using yt-dlp."""
     is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
     proxy = get_proxy_url()
     
-    # On Vercel, YouTube blocks direct datacenter IPs, so try proxy first; locally try direct first
+    # On Vercel, YouTube blocks direct datacenter IPs, so try proxy first if configured; locally try direct first
     attempts = [proxy, None] if (is_vercel and proxy) else [None, proxy] if proxy else [None]
     
     for attempt_proxy in attempts:
@@ -331,14 +318,12 @@ def fetch_video_metadata(url: str):
 _supadata_key_index = 0
 
 def get_supadata_keys() -> List[str]:
-    """Retrieves list of Supadata API keys from environment variables or default fallback."""
+    """Retrieves list of Supadata API keys from environment variables."""
     raw = os.environ.get("SUPADATA_API_KEYS") or os.environ.get("SUPADATA_API_KEY") or ""
     # Extract keys starting with sd_ or split by comma/whitespace/quotes
     keys = re.findall(r'sd_[a-zA-Z0-9]+', raw)
     if not keys:
         keys = [k.strip('\"\' ') for k in re.split(r'[,\s\n]+', raw) if k.strip('\"\' ')]
-    if not keys:
-        keys = list(DEFAULT_SUPADATA_KEYS)
     return keys
 
 def fetch_transcript_supadata(video_id: str) -> List[dict]:
