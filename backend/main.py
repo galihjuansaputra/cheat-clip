@@ -28,19 +28,6 @@ from google.genai import types
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cheat-clip")
 
-# ----------------------------------------------------------------
-# Proxy Configuration: Isolated strictly to transcripts
-# ----------------------------------------------------------------
-# To prevent slow network latency on Gemini AI calls, SSE streams,
-# and metadata fetching, we isolate any configured proxy so that
-# ONLY YouTube transcript extraction routes through it.
-TRANSCRIPT_PROXY = os.environ.get("TRANSCRIPT_PROXY") or os.environ.get("YOUTUBE_PROXY")
-for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-    if _k in os.environ:
-        if not TRANSCRIPT_PROXY:
-            TRANSCRIPT_PROXY = os.environ[_k]
-        del os.environ[_k]
-
 app = FastAPI(title="CHEAT CLIP API", description="AI-powered YouTube Viral Hotspot Finder")
 
 # Configure CORS
@@ -306,155 +293,66 @@ def fetch_video_metadata(url: str):
             raise HTTPException(status_code=400, detail=f"Failed to retrieve YouTube video details: {str(e)}")
 
 
-def parse_webvtt_transcript(vtt_text: str) -> List[dict]:
-    """Parses standard WebVTT caption text into cheat-clip transcript segment dictionaries."""
-    def to_seconds(t_str: str) -> float:
-        parts = t_str.strip().split(':')
-        if len(parts) == 3:
-            h, m, s = parts
-            return int(h) * 3600 + int(m) * 60 + float(s)
-        elif len(parts) == 2:
-            m, s = parts
-            return int(m) * 60 + float(s)
-        return 0.0
+_supadata_key_index = 0
 
-    lines = vtt_text.splitlines()
-    entries = []
-    i = 0
-    time_re = re.compile(r'(\d+:\d+(?::\d+)?(?:\.\d+)?)\s*-->\s*(\d+:\d+(?::\d+)?(?:\.\d+)?)')
-    while i < len(lines):
-        line = lines[i].strip()
-        m = time_re.search(line)
-        if m:
-            start = to_seconds(m.group(1))
-            end = to_seconds(m.group(2))
-            dur = max(0.0, round(end - start, 3))
-            i += 1
-            text_lines = []
-            while i < len(lines) and lines[i].strip() and not time_re.search(lines[i]):
-                text_lines.append(lines[i].strip())
-                i += 1
-            text = ' '.join(text_lines)
-            # Remove any formatting tags (e.g., <c>, </c>)
-            text = re.sub(r'<[^>]+>', '', text).strip()
-            if text:
-                entries.append({'text': text, 'start': start, 'duration': dur})
-        else:
-            i += 1
-    return entries
+def get_supadata_keys() -> List[str]:
+    """Retrieves list of Supadata API keys from environment variables."""
+    raw = os.environ.get("SUPADATA_API_KEYS") or os.environ.get("SUPADATA_API_KEY") or ""
+    keys = [k.strip() for k in re.split(r'[,\s\n]+', raw) if k.strip()]
+    return keys
 
-
-def fetch_transcript_invidious(video_id: str) -> List[dict]:
-    """Fallback Strategy: Attempts to retrieve subtitles from public Invidious instances without a proxy."""
+def fetch_transcript_supadata(video_id: str) -> List[dict]:
+    """Fetches transcript from Supadata API, rotating through available keys if rate limits/quotas occur."""
+    global _supadata_key_index
     import requests
     
-    custom_inst = os.environ.get("INVIDIOUS_INSTANCE")
-    instances = [
-        custom_inst.rstrip('/') if custom_inst else None,
-        "https://inv.nadeko.net",
-        "https://invidious.nerdvpn.de",
-        "https://invidious.f5.si",
-        "https://invidious.tiekoetter.com",
-        "https://invidious.projectsegfau.lt"
-    ]
-    instances = [inst for inst in instances if inst]
+    keys = get_supadata_keys()
+    if not keys:
+        return []
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-    }
+    # Round-robin key rotation to evenly distribute load across keys
+    start_idx = _supadata_key_index % len(keys)
+    rotated_keys = keys[start_idx:] + keys[:start_idx]
+    _supadata_key_index = (_supadata_key_index + 1) % len(keys)
 
-    priority_langs = ['en', 'id', 'es', 'pt', 'fr', 'de', 'ja', 'ko']
-
-    for inst in instances:
+    for key in rotated_keys:
+        masked_key = f"{key[:7]}...{key[-4:]}" if len(key) >= 11 else "***"
         try:
-            logger.info(f"Attempting Invidious subtitle fetch via: {inst}")
-            r = requests.get(f"{inst}/api/v1/captions/{video_id}", headers=headers, timeout=5)
-            if r.status_code != 200:
+            logger.info(f"Attempting Supadata transcript fetch with key {masked_key}")
+            response = requests.get(
+                "https://api.supadata.ai/v1/youtube/transcript",
+                headers={"x-api-key": key},
+                params={"videoId": video_id},
+                timeout=12
+            )
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get("content") or []
+                if content:
+                    result = []
+                    for seg in content:
+                        text = seg.get("text", "").strip()
+                        if text:
+                            start = float(seg.get("offset", 0)) / 1000.0
+                            dur = float(seg.get("duration", 0)) / 1000.0
+                            result.append({"text": text, "start": start, "duration": dur})
+                    if result:
+                        logger.info(f"Successfully retrieved {len(result)} transcript lines via Supadata ({masked_key})")
+                        return result
+            elif response.status_code in (429, 402, 403, 401):
+                logger.warning(f"Supadata key {masked_key} returned status {response.status_code} (quota/limit). Rotating to next key...")
                 continue
-            
-            data = r.json()
-            captions = data.get("captions", [])
-            if not captions:
-                continue
-
-            selected_url = None
-            for plang in priority_langs:
-                # Prefer manual captions first
-                match = next((c for c in captions if c.get("languageCode") == plang and "auto" not in c.get("label", "").lower()), None)
-                if not match:
-                    match = next((c for c in captions if c.get("languageCode") == plang), None)
-                if match and match.get("url"):
-                    selected_url = match["url"]
-                    break
-            
-            if not selected_url and captions and captions[0].get("url"):
-                selected_url = captions[0]["url"]
-
-            if not selected_url:
-                continue
-
-            caption_fetch_url = selected_url if selected_url.startswith("http") else f"{inst}{selected_url}"
-            cap_res = requests.get(caption_fetch_url, headers=headers, timeout=6)
-            if cap_res.status_code == 200 and len(cap_res.text.strip()) > 50:
-                parsed = parse_webvtt_transcript(cap_res.text)
-                if parsed:
-                    logger.info(f"Successfully retrieved transcript via Invidious ({inst})")
-                    return parsed
+            else:
+                logger.warning(f"Supadata key {masked_key} returned status {response.status_code}: {response.text[:100]}")
         except Exception as e:
-            logger.warning(f"Invidious instance ({inst}) failed: {e}")
+            logger.warning(f"Supadata request with key {masked_key} failed: {e}")
             continue
 
     return []
 
 
-def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
-    """Fallback Strategy: Attempts to extract captions using yt-dlp's player response without a proxy."""
-    import requests
-    ydl_opts = {
-        'skip_download': True,
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'proxy': None
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            if not info:
-                return []
-            
-            subtitles = info.get('subtitles') or {}
-            auto_subtitles = info.get('automatic_captions') or {}
-            
-            priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko']
-            # Search manual first, then automatic captions
-            for lang_dict, is_auto in [(subtitles, False), (auto_subtitles, True)]:
-                for lang in priority_langs:
-                    formats = lang_dict.get(lang) or []
-                    json3_entry = next((f['url'] for f in formats if f.get('ext') == 'json3'), None)
-                    if json3_entry:
-                        r = requests.get(json3_entry, timeout=8)
-                        if r.status_code == 200:
-                            events = r.json().get('events', [])
-                            result = []
-                            for ev in events:
-                                segs = ev.get('segs', [])
-                                text = ''.join(s.get('utf8', '') for s in segs).strip()
-                                if text:
-                                    start = ev.get('tStartMs', 0) / 1000.0
-                                    dur = ev.get('dDurationMs', 0) / 1000.0
-                                    result.append({'text': text, 'start': start, 'duration': dur})
-                            if result:
-                                logger.info(f"Transcript fetched via yt-dlp fallback (lang={lang}, auto={is_auto})")
-                                return result
-    except Exception as e:
-        logger.warning(f"yt-dlp subtitle fallback failed: {e}")
-    return []
-
-
 def fetch_transcript(video_id: str) -> List[dict]:
-    """Retrieves subtitles with multiple fallback strategies, routing through a proxy if configured."""
+    """Retrieves subtitles, prioritizing direct YouTube fetch and falling back to rotating Supadata API."""
 
     def to_dict_list(fetched) -> List[dict]:
         return [
@@ -466,23 +364,9 @@ def fetch_transcript(video_id: str) -> List[dict]:
             for line in fetched
         ]
 
-    # Dedicated proxy specifically for transcript retrieval (keeps Gemini, SSE, and metadata fast)
-    proxy_url = TRANSCRIPT_PROXY or os.environ.get("TRANSCRIPT_PROXY") or os.environ.get("YOUTUBE_PROXY")
-    if proxy_url:
-        import requests
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        session = requests.Session()
-        session.trust_env = False  # Ignore ambient OS/system proxies
-        session.proxies = {"http": proxy_url, "https": proxy_url}
-        session.verify = False
-        api = YouTubeTranscriptApi(http_client=session)
-        logger.info("Using dedicated proxy for transcript retrieval")
-    else:
-        api = YouTubeTranscriptApi()
+    api = YouTubeTranscriptApi()
 
-    # ── Strategy 1: direct fetch by language priority ────────────────────────
+    # ── Strategy 1: direct fetch by language priority (works on localhost/residential) ──
     priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'ar', 'hi', 'ru']
     for lang in priority_langs:
         try:
@@ -514,15 +398,10 @@ def fetch_transcript(video_id: str) -> List[dict]:
     except Exception as e:
         logger.warning(f"Could not list transcripts: {e}")
 
-    # ── Strategy 3: Invidious Instances Fallback (No Proxy) ───────────────────
-    invidious_data = fetch_transcript_invidious(video_id)
-    if invidious_data:
-        return invidious_data
-
-    # ── Strategy 4: yt-dlp Native Extraction Fallback (No Proxy) ──────────────
-    ytdlp_data = fetch_transcript_ytdlp(video_id)
-    if ytdlp_data:
-        return ytdlp_data
+    # ── Strategy 3: Rotating Supadata API (Bypasses Vercel/datacenter IP blocks) ───
+    supadata_data = fetch_transcript_supadata(video_id)
+    if supadata_data:
+        return supadata_data
 
     # ── All strategies exhausted ──────────────────────────────────────────────
     raise HTTPException(
