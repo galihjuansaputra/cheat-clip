@@ -948,3 +948,24 @@ label[for="manual-subtitle-file"]:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(255, 94, 58, 0.15);
 }
+
+/* Loading Progress Section Entrance & Visual Glow */
+#loading-progress-section {
+  scroll-margin-top: 2.5rem;
+  animation: loadingCardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 0 30px rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+@keyframes loadingCardEntrance {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+

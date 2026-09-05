@@ -153,7 +153,23 @@ export default function App() {
   const playerRef = useRef<any>(null);
   const trackingInterval = useRef<number | null>(null);
   const clipEndIntervalRef = useRef<number | null>(null);
+  const loadingSectionRef = useRef<HTMLElement | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Automatically scroll down to the loading progress section when analysis starts
+  useEffect(() => {
+    if (loading) {
+      const scrollTimer = setTimeout(() => {
+        if (loadingSectionRef.current) {
+          loadingSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          const el = document.getElementById('loading-progress-section');
+          el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+      return () => clearTimeout(scrollTimer);
+    }
+  }, [loading]);
 
   // Initialize YouTube IFrame API
   useEffect(() => {
@@ -827,10 +843,10 @@ export default function App() {
       if (resultData.clips?.length > 0) setActiveClip(resultData.clips[0]);
       setTimeout(() => initPlayer(resultData!.video_id), 100);
 
-      // On mobile devices, scroll smoothly to the dashboard so results are immediately visible
+      // Scroll smoothly to the dashboard so results are immediately visible
       setTimeout(() => {
         const dashboard = document.querySelector('.dashboard-grid');
-        if (dashboard && window.innerWidth <= 1024) {
+        if (dashboard) {
           dashboard.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }, 250);
@@ -1582,7 +1598,19 @@ Transcript:
 
       {/* Loading Steps state with Real Progress Bars & Cognitive AI Diagnostics */}
       {loading && (
-        <section className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '2.5rem 1.75rem' }}>
+        <section
+          ref={loadingSectionRef}
+          id="loading-progress-section"
+          className="glass-panel"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            alignItems: 'center',
+            padding: '2.5rem 1.75rem',
+            scrollMarginTop: '2.5rem'
+          }}
+        >
           <div style={{ width: '100%', maxWidth: '620px' }}>
             <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
               <h3 style={{ marginBottom: '0.4rem', fontSize: '1.4rem' }} className="text-gradient">
