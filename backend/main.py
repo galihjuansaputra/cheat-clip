@@ -573,15 +573,40 @@ def health_check():
 
 
 
+def parse_gemini_model_sort_key(name: str):
+    """Sort key for Gemini models: parses major and minor versions (e.g. 3.7, 3.6, 3.5, 2.5, 2.0, 1.5),
+    tier (standard > lite/8b > preview/exp), so newest and most capable models come first."""
+    name_clean = (name or "").split('/')[-1].lower()
+    m = re.search(r'(\d+)(?:\.(\d+))?', name_clean)
+    if m:
+        major = int(m.group(1))
+        minor = int(m.group(2)) if m.group(2) is not None else 0
+    else:
+        major, minor = 0, 0
+
+    if 'lite' in name_clean or '8b' in name_clean:
+        tier = 2
+    elif 'exp' in name_clean or 'preview' in name_clean:
+        tier = 1
+    else:
+        tier = 3
+
+    return (major, minor, tier, name_clean)
+
+
 KNOWN_FLASH_MODELS = [
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
 ]
 
 def get_flash_models_for_key(client: genai.Client) -> List[str]:
-    """Dynamically query all available flash models for the given API key, merged with known models."""
+    """Dynamically query all available flash models for the given API key.
+    Discovers newer versions (e.g., 3.7, 3.6, 3.5) and earlier versions (2.5, 2.0, 1.5),
+    merging with known fallback models and sorting in descending order of version/capability."""
     discovered = []
     try:
         models_page = client.models.list()
@@ -591,38 +616,33 @@ def get_flash_models_for_key(client: genai.Client) -> List[str]:
             if "gemini" in short_name.lower() and "flash" in short_name.lower():
                 if m.supported_actions and "generateContent" not in m.supported_actions:
                     continue
-                exclude = ['1.5', '1.0', 'tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
-                if not any(x in short_name.lower() for x in exclude):
+                # Exclude non-text, specialized, or non-generative tasks
+                exclude_keywords = [
+                    'tuning', 'thinking', 'vision', 'image', 'tts',
+                    'omni', 'customtools', 'embed', 'realtime', 'robotics'
+                ]
+                if not any(x in short_name.lower() for x in exclude_keywords):
                     if short_name not in discovered:
                         discovered.append(short_name)
     except Exception as e:
         logger.warning(f"Could not dynamically list models: {e}")
 
-    # Prioritize KNOWN_FLASH_MODELS order
-    ordered = []
-    for km in KNOWN_FLASH_MODELS:
-        if km in discovered:
-            ordered.append(km)
-    for d in discovered:
-        if d not in ordered:
-            ordered.append(d)
-
-    # Ensure known flash models are always available as fallbacks
-    for km in KNOWN_FLASH_MODELS:
-        if km not in ordered:
-            ordered.append(km)
-
+    # Combine discovered with known flash models, preserving uniqueness
+    combined_pool = list(dict.fromkeys(discovered + KNOWN_FLASH_MODELS))
+    # Sort descending so newest versions (3.7, 3.6, 3.5, 2.5, 2.0, 1.5) are prioritized
+    ordered = sorted(combined_pool, key=parse_gemini_model_sort_key, reverse=True)
     return ordered
 
 
 @app.get("/api/models")
 def list_available_models(api_key: str = ""):
-    """Fetches list of available Gemini models using the user's API key, prioritizing Flash models."""
+    """Fetches list of available Gemini models using the user's API key, prioritizing Flash models (newest first)."""
     default_models = [
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',
         'gemini-2.0-flash',
         'gemini-2.0-flash-lite',
+        'gemini-1.5-flash',
         'gemini-2.5-pro'
     ]
     key_to_use = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
@@ -643,10 +663,10 @@ def list_available_models(api_key: str = ""):
                     continue
                 
                 short_name = name.split('/')[-1]
-                # Filter out deprecated models like 1.5 and 1.0 series and specialized non-text variants
-                if any(dep in short_name.lower() for dep in ['1.5', '1.0']):
-                    continue
-                exclude_keywords = ['tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
+                exclude_keywords = [
+                    'tuning', 'thinking', 'vision', 'image', 'tts',
+                    'omni', 'customtools', 'embed', 'realtime', 'robotics'
+                ]
                 if any(x in short_name.lower() for x in exclude_keywords):
                     continue
                 
@@ -660,18 +680,16 @@ def list_available_models(api_key: str = ""):
                     if short_name not in other_models:
                         other_models.append(short_name)
         
-        preferred_flash_order = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite']
-        ordered_flash = []
-        for pref in preferred_flash_order:
-            if pref in flash_models:
-                ordered_flash.append(pref)
-        for name in flash_models:
-            if name not in ordered_flash:
-                ordered_flash.append(name)
-                
-        ordered_pro = [p for p in ['gemini-2.5-pro'] if p in pro_models] + [p for p in pro_models if p != 'gemini-2.5-pro']
+        # Sort flash models by version descending (e.g. 3.7, 3.6, 3.5, 2.5, 2.0, 1.5)
+        ordered_flash = sorted(
+            list(dict.fromkeys(flash_models + KNOWN_FLASH_MODELS)),
+            key=parse_gemini_model_sort_key,
+            reverse=True
+        )
+        ordered_pro = sorted(pro_models, key=parse_gemini_model_sort_key, reverse=True)
+        ordered_other = sorted(other_models, key=parse_gemini_model_sort_key, reverse=True)
         
-        final_list = ordered_flash + ordered_pro + other_models
+        final_list = ordered_flash + ordered_pro + ordered_other
         if not final_list:
             final_list = default_models
             
@@ -1026,8 +1044,8 @@ async def analyze_video(request: AnalyzeRequest):
         )
 
         requested_model = (request.model or 'gemini-2.5-flash').strip()
-        if any(dep in requested_model.lower() for dep in ['1.5', '1.0']):
-            logger.info(f"Requested model '{requested_model}' is deprecated. Upgrading to gemini-2.5-flash.")
+        if any(dep in requested_model.lower() for dep in ['gemini-1.0', 'gemini-pro-vision']):
+            logger.info(f"Requested model '{requested_model}' is outdated. Upgrading to gemini-2.5-flash.")
             requested_model = 'gemini-2.5-flash'
 
         yield _sse({
@@ -1047,12 +1065,15 @@ async def analyze_video(request: AnalyzeRequest):
         discovered_flash = await asyncio.to_thread(get_flash_models_for_key, client)
         
         # Build models_to_try:
+        # 1. Start with the requested model
+        # 2. Append all discovered and known flash models in version descending order (e.g. 3.7, 3.6, 3.5, 2.5, 2.0, 1.5)
+        #    so all available flash models are tried before giving up
         models_to_try = [requested_model]
         for fm in discovered_flash:
-            if fm not in models_to_try and not any(dep in fm.lower() for dep in ['1.5', '1.0']):
+            if fm not in models_to_try:
                 models_to_try.append(fm)
         for km in KNOWN_FLASH_MODELS:
-            if km not in models_to_try and not any(dep in km.lower() for dep in ['1.5', '1.0']):
+            if km not in models_to_try:
                 models_to_try.append(km)
 
         logger.info(f"Flash fallback chain prepared: {models_to_try}")
@@ -1064,14 +1085,7 @@ async def analyze_video(request: AnalyzeRequest):
         successful_model = None
 
         for idx, model_name in enumerate(models_to_try):
-            if any(dep in model_name.lower() for dep in ['1.5', '1.0']):
-                continue
-
-            next_model_hint = None
-            for cand in models_to_try[idx + 1:]:
-                if not any(dep in cand.lower() for dep in ['1.5', '1.0']):
-                    next_model_hint = cand
-                    break
+            next_model_hint = models_to_try[idx + 1] if idx + 1 < len(models_to_try) else None
 
             MAX_RETRIES = 2
             
@@ -1270,14 +1284,14 @@ async def analyze_video(request: AnalyzeRequest):
                     })
                 elif any(x in err_str for x in ('404', 'not found', 'not supported')):
                     yield _sse({
-                        "error": f"The selected AI model ({requested_model}) is deprecated or unavailable in the Gemini API. Please switch to 'gemini-2.5-flash'.",
+                        "error": f"The selected AI model ({requested_model}) and all available fallback Flash models were unavailable in the Gemini API. Please check your API key at aistudio.google.com.",
                         "status": 404
                     })
                 else:
                     logger.error(f"Gemini error after all fallback models: {error_to_report}")
-                    yield _sse({"error": f"AI analysis failed: {str(error_to_report)}", "status": 500})
+                    yield _sse({"error": f"AI analysis failed across all available Flash models: {str(error_to_report)}", "status": 500})
             else:
-                yield _sse({"error": "Gemini returned no response.", "status": 500})
+                yield _sse({"error": "Gemini returned no response after trying all available Flash models.", "status": 500})
             return
 
         # Fallback clip synthesis if 0 clips were returned after all models

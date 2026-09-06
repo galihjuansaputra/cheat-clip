@@ -23,7 +23,7 @@ export const id: Translations = {
     aiModelLabel: "Pilihan Model AI",
     fetchingModels: "Mengambil daftar model...",
     resilienceTip: "Ketahanan Kuota Gratis:",
-    resilienceDesc: "Jika model mencapai batas kuota atau error, Cheat Clip secara otomatis mencoba semua model Flash yang tersedia (gemini-2.5-flash, 2.0-flash, 2.0-flash-lite, 1.5-flash) hingga klip berhasil ditemukan!",
+    resilienceDesc: "Jika model mencapai batas kuota atau error, Cheat Clip secara dinamis mencoba seluruh model Flash baru maupun lama (3.x, 2.5, 2.0, 1.5) dari API key Anda hingga klip berhasil ditemukan!",
     
     // Customization
     clipCustomizationTitle: "Kustomisasi Klip",

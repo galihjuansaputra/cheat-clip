@@ -22,8 +22,8 @@ export default function App() {
   // AI model selection and custom focus prompt states
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     const saved = localStorage.getItem('cheat_clip_selected_model');
-    // Auto-migrate outdated or 404 models like gemini-1.5-* to gemini-2.5-flash
-    if (saved && (saved.includes('1.5') || saved.includes('1.0'))) {
+    // Auto-migrate outdated 1.0 models to gemini-2.5-flash
+    if (saved && (saved.includes('1.0') || saved.includes('vision'))) {
       localStorage.setItem('cheat_clip_selected_model', 'gemini-2.5-flash');
       return 'gemini-2.5-flash';
     }
@@ -1235,6 +1235,7 @@ Transcript:
                       <option value="gemini-2.5-flash-lite" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-flash-lite (Ultra-fast & lightweight)</option>
                       <option value="gemini-2.0-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash (Fast & responsive)</option>
                       <option value="gemini-2.0-flash-lite" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash-lite (Lightweight flash)</option>
+                      <option value="gemini-1.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-1.5-flash (Fallback flash)</option>
                       <option value="gemini-2.5-pro" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-pro (Creative & complex - High quota)</option>
                     </>
                   )}
