@@ -575,10 +575,9 @@ def health_check():
 
 KNOWN_FLASH_MODELS = [
     'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
 ]
 
 def get_flash_models_for_key(client: genai.Client) -> List[str]:
@@ -592,7 +591,7 @@ def get_flash_models_for_key(client: genai.Client) -> List[str]:
             if "gemini" in short_name.lower() and "flash" in short_name.lower():
                 if m.supported_actions and "generateContent" not in m.supported_actions:
                     continue
-                exclude = ['tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
+                exclude = ['1.5', '1.0', 'tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
                 if not any(x in short_name.lower() for x in exclude):
                     if short_name not in discovered:
                         discovered.append(short_name)
@@ -621,10 +620,9 @@ def list_available_models(api_key: str = ""):
     """Fetches list of available Gemini models using the user's API key, prioritizing Flash models."""
     default_models = [
         'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
         'gemini-2.0-flash',
         'gemini-2.0-flash-lite',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-8b',
         'gemini-2.5-pro'
     ]
     key_to_use = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
@@ -645,8 +643,8 @@ def list_available_models(api_key: str = ""):
                     continue
                 
                 short_name = name.split('/')[-1]
-                # Filter out deprecated models like 1.5-pro and specialized non-text variants
-                if "1.5-pro" in short_name.lower():
+                # Filter out deprecated models like 1.5 and 1.0 series and specialized non-text variants
+                if any(dep in short_name.lower() for dep in ['1.5', '1.0']):
                     continue
                 exclude_keywords = ['tuning', 'thinking', 'vision', 'image', 'tts', 'omni', 'customtools', 'embed']
                 if any(x in short_name.lower() for x in exclude_keywords):
@@ -662,7 +660,7 @@ def list_available_models(api_key: str = ""):
                     if short_name not in other_models:
                         other_models.append(short_name)
         
-        preferred_flash_order = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
+        preferred_flash_order = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite']
         ordered_flash = []
         for pref in preferred_flash_order:
             if pref in flash_models:
@@ -1028,7 +1026,7 @@ async def analyze_video(request: AnalyzeRequest):
         )
 
         requested_model = (request.model or 'gemini-2.5-flash').strip()
-        if '1.5-pro' in requested_model.lower():
+        if any(dep in requested_model.lower() for dep in ['1.5', '1.0']):
             logger.info(f"Requested model '{requested_model}' is deprecated. Upgrading to gemini-2.5-flash.")
             requested_model = 'gemini-2.5-flash'
 
@@ -1051,26 +1049,27 @@ async def analyze_video(request: AnalyzeRequest):
         # Build models_to_try:
         models_to_try = [requested_model]
         for fm in discovered_flash:
-            if fm not in models_to_try and '1.5-pro' not in fm.lower():
+            if fm not in models_to_try and not any(dep in fm.lower() for dep in ['1.5', '1.0']):
                 models_to_try.append(fm)
         for km in KNOWN_FLASH_MODELS:
-            if km not in models_to_try:
+            if km not in models_to_try and not any(dep in km.lower() for dep in ['1.5', '1.0']):
                 models_to_try.append(km)
 
         logger.info(f"Flash fallback chain prepared: {models_to_try}")
 
         response = None
         last_error = None
+        encountered_quota_error = None
         analysis_data = None
         successful_model = None
 
         for idx, model_name in enumerate(models_to_try):
-            if '1.5-pro' in model_name.lower():
+            if any(dep in model_name.lower() for dep in ['1.5', '1.0']):
                 continue
 
             next_model_hint = None
             for cand in models_to_try[idx + 1:]:
-                if '1.5-pro' not in cand.lower():
+                if not any(dep in cand.lower() for dep in ['1.5', '1.0']):
                     next_model_hint = cand
                     break
 
@@ -1221,7 +1220,11 @@ async def analyze_video(request: AnalyzeRequest):
                     err_str = str(e).lower()
                     logger.warning(f"Error from {model_name} (attempt {attempt + 1}): {e}")
                     
-                    if any(x in err_str for x in ('404', 'not found', 'not supported', '429', 'quota', 'resource exhausted', 'rate limit')):
+                    if any(x in err_str for x in ('429', 'quota', 'resource exhausted', 'rate limit')):
+                        encountered_quota_error = e
+                        break
+
+                    if any(x in err_str for x in ('404', 'not found', 'not supported')):
                         break
                     
                     is_server_busy = any(x in err_str for x in ('503', 'unavailable', 'overloaded', '500', 'internal'))
@@ -1246,8 +1249,10 @@ async def analyze_video(request: AnalyzeRequest):
                 })
 
         if analysis_data is None:
-            if last_error is not None:
-                err_str = str(last_error).lower()
+            # If any model in the fallback chain suffered quota exhaustion, prioritize showing the quota explanation
+            error_to_report = encountered_quota_error or last_error
+            if error_to_report is not None:
+                err_str = str(error_to_report).lower()
                 if any(x in err_str for x in ('429', 'quota', 'resource exhausted', 'rate limit')):
                     yield _sse({
                         "error": "Gemini API free quota/rate limit was reached across all Flash models. Free keys have a request limit per minute. Please wait 30–60 seconds and try again, or generate a new free key at aistudio.google.com.",
@@ -1263,9 +1268,14 @@ async def analyze_video(request: AnalyzeRequest):
                         "error": "Invalid Gemini API key or unauthorized. Please verify your API key at aistudio.google.com.",
                         "status": 401
                     })
+                elif any(x in err_str for x in ('404', 'not found', 'not supported')):
+                    yield _sse({
+                        "error": f"The selected AI model ({requested_model}) is deprecated or unavailable in the Gemini API. Please switch to 'gemini-2.5-flash'.",
+                        "status": 404
+                    })
                 else:
-                    logger.error(f"Gemini error after all fallback models: {last_error}")
-                    yield _sse({"error": f"AI analysis failed: {str(last_error)}", "status": 500})
+                    logger.error(f"Gemini error after all fallback models: {error_to_report}")
+                    yield _sse({"error": f"AI analysis failed: {str(error_to_report)}", "status": 500})
             else:
                 yield _sse({"error": "Gemini returned no response.", "status": 500})
             return

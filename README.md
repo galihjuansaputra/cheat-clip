@@ -192,7 +192,7 @@ Fetches list of available text-generation Gemini models filtered by user capabil
 **Response:**
 ```json
 {
-  "models": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
+  "models": ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-pro"]
 }
 ```
 

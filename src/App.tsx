@@ -22,8 +22,8 @@ export default function App() {
   // AI model selection and custom focus prompt states
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     const saved = localStorage.getItem('cheat_clip_selected_model');
-    // Auto-migrate outdated or 404 models like gemini-1.5-pro to gemini-2.5-flash
-    if (saved && (saved.includes('1.5-pro') || saved === 'gemini-1.5-pro')) {
+    // Auto-migrate outdated or 404 models like gemini-1.5-* to gemini-2.5-flash
+    if (saved && (saved.includes('1.5') || saved.includes('1.0'))) {
       localStorage.setItem('cheat_clip_selected_model', 'gemini-2.5-flash');
       return 'gemini-2.5-flash';
     }
@@ -217,7 +217,7 @@ export default function App() {
           const data = await res.json();
           if (data.models && data.models.length > 0) {
             setAvailableModels(data.models);
-            if (!data.models.includes(selectedModel) || selectedModel.includes('1.5-pro')) {
+            if (!data.models.includes(selectedModel) || selectedModel.includes('1.5') || selectedModel.includes('1.0')) {
               const fallback = data.models.find((m: string) => m.includes('flash')) || data.models[0] || 'gemini-2.5-flash';
               setSelectedModel(fallback);
               localStorage.setItem('cheat_clip_selected_model', fallback);
@@ -1232,9 +1232,9 @@ Transcript:
                   ) : (
                     <>
                       <option value="gemini-2.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-flash (Fast & recommended - Free tier friendly)</option>
+                      <option value="gemini-2.5-flash-lite" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-flash-lite (Ultra-fast & lightweight)</option>
                       <option value="gemini-2.0-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash (Fast & responsive)</option>
-                      <option value="gemini-2.0-flash-lite" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash-lite (Ultra-fast & lightweight)</option>
-                      <option value="gemini-1.5-flash" style={{ background: '#0d1324', color: '#fff' }}>gemini-1.5-flash (Standard flash)</option>
+                      <option value="gemini-2.0-flash-lite" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.0-flash-lite (Lightweight flash)</option>
                       <option value="gemini-2.5-pro" style={{ background: '#0d1324', color: '#fff' }}>gemini-2.5-pro (Creative & complex - High quota)</option>
                     </>
                   )}
