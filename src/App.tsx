@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { HeatmapTimeline } from './components/HeatmapTimeline';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { useLanguage } from './locales';
 import type { AnalyzeResponse, ViralClip } from './types';
 
 // Declare YT global variables for TypeScript
@@ -11,6 +13,7 @@ declare global {
 }
 
 export default function App() {
+  const { t } = useLanguage();
   const [url, setUrl] = useState('');
   const [durationPref, setDurationPref] = useState<'15s' | '30s' | '60s'>('30s');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('cheat_clip_gemini_api_key') || '');
@@ -363,14 +366,14 @@ export default function App() {
       setCurrentStep(1);
       setStepProgress({ 1: 100, 2: 0, 3: 0, 4: 0 });
       setOverallProgress(25);
-      setLoadingDetails('Loading from history...');
+      setLoadingDetails(t.loading.loadingFromHistory);
       setTimeout(() => {
         setCurrentStep(4);
         setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 85 });
         setOverallProgress(90);
-        setAiStage('Restoring Viral Hotspots');
-        setAiDetail('Reconstructing engagement timestamps from saved analysis...');
-        setLoadingDetails('Restoring viral hotspots from saved analysis...');
+        setAiStage(t.loading.restoringHotspots);
+        setAiDetail(t.loading.reconstructingTimestamps);
+        setLoadingDetails(t.loading.reconstructingTimestamps);
         setTimeout(() => {
           setStepProgress({ 1: 100, 2: 100, 3: 100, 4: 100 });
           setOverallProgress(100);
@@ -383,7 +386,7 @@ export default function App() {
         }, 500);
       }, 600);
     } catch (_) {
-      setToastMessage('Failed to load this history entry.');
+      setToastMessage(t.form.historyLoadFailed);
       setTimeout(() => setToastMessage(null), 3000);
     }
   };
@@ -396,7 +399,7 @@ export default function App() {
     localStorage.removeItem(cacheKey);
     localStorage.removeItem(tsKey);
     refreshHistory();
-    setToastMessage(`Removed "${entry.title}" from history.`);
+    setToastMessage(t.form.removedFromHistory(entry.title));
     setTimeout(() => setToastMessage(null), 3000);
   };
 
@@ -410,19 +413,19 @@ export default function App() {
     }
     toRemove.forEach(k => localStorage.removeItem(k));
     setHistory([]);
-    setToastMessage('All history cleared.');
+    setToastMessage(t.form.allHistoryCleared);
     setTimeout(() => setToastMessage(null), 3000);
   };
 
   const formatRelativeTime = (iso: string) => {
     const diff = Date.now() - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
+    if (mins < 1) return t.relativeTime.justNow;
+    if (mins < 60) return t.relativeTime.minsAgo(mins);
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
+    if (hrs < 24) return t.relativeTime.hrsAgo(hrs);
     const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
+    return t.relativeTime.daysAgo(days);
   };
 
 
@@ -595,7 +598,7 @@ export default function App() {
 
     // Require an API key before making any request
     if (!apiKey.trim()) {
-      setError('A Gemini API Key is required to analyze videos. Get a free key at aistudio.google.com and paste it in the field below.');
+      setError(t.errors.apiKeyRequired);
       return;
     }
 
@@ -607,11 +610,11 @@ export default function App() {
       const parsedEnd = parseTimeToSeconds(customRangeEnd);
 
       if (customRangeStart.trim() && parsedStart === null) {
-        setError('Invalid start time format. Please use MM:SS (e.g. 29:00), HH:MM:SS, or raw seconds.');
+        setError(t.errors.invalidStart);
         return;
       }
       if (customRangeEnd.trim() && parsedEnd === null) {
-        setError('Invalid end time format. Please use MM:SS (e.g. 31:15), HH:MM:SS, or raw seconds.');
+        setError(t.errors.invalidEnd);
         return;
       }
 
@@ -619,13 +622,13 @@ export default function App() {
       if (parsedEnd !== null) rangeEndSecs = parsedEnd;
 
       if (rangeStartSecs !== undefined && rangeEndSecs !== undefined && rangeStartSecs >= rangeEndSecs) {
-        setError('Start time must be less than end time.');
+        setError(t.errors.startLessThanEnd);
         return;
       }
     }
 
     if (subtitlesSource === 'manual' && !manualSubtitlesContent.trim()) {
-      setError('Please choose or drag-and-drop a custom subtitle file (.srt or .txt).');
+      setError(t.errors.chooseSubtitleFile);
       return;
     }
 
@@ -916,7 +919,7 @@ Transcript:
     }
 
     navigator.clipboard.writeText(copyText).then(() => {
-      setToastMessage(`Copied "${clip.title}" details to clipboard!`);
+      setToastMessage(t.results.copiedDetailsToast(clip.title));
       setTimeout(() => {
         setToastMessage(null);
       }, 3000);
@@ -933,13 +936,13 @@ Transcript:
     downloadAnchor.click();
     downloadAnchor.remove();
 
-    setToastMessage("Downloaded clips as JSON successfully!");
+    setToastMessage(t.results.downloadedJsonToast);
     setTimeout(() => setToastMessage(null), 3000);
   };
 
   const handleExportSRT = () => {
     if (!result || !result.transcript) {
-      setToastMessage("No transcript available to export.");
+      setToastMessage(t.results.noTranscriptToExport);
       setTimeout(() => setToastMessage(null), 3000);
       return;
     }
@@ -967,7 +970,7 @@ Transcript:
     downloadAnchor.click();
     downloadAnchor.remove();
 
-    setToastMessage("Downloaded subtitles as SRT successfully!");
+    setToastMessage(t.results.downloadedSrtToast);
     setTimeout(() => setToastMessage(null), 3000);
   };
 
@@ -998,7 +1001,7 @@ Transcript:
     });
 
     navigator.clipboard.writeText(md).then(() => {
-      setToastMessage("Copied all clips as Markdown to clipboard!");
+      setToastMessage(t.results.copiedMarkdownToast);
       setTimeout(() => setToastMessage(null), 3000);
     });
   };
@@ -1078,10 +1081,11 @@ Transcript:
           <span style={{ fontSize: '2.5rem' }}>⚡</span>
           <div>
             <h1 className="text-gradient logo-title">CHEAT CLIP</h1>
-            <p className="header-subtitle">AI-Powered YouTube Viral Hook & Hotspot Finder</p>
+            <p className="header-subtitle">{t.header.subtitle}</p>
           </div>
         </div>
-        <div className="header-nav">
+        <div className="header-nav" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <LanguageSwitcher />
           <a
             href="https://tako.id/johansa"
             target="_blank"
@@ -1096,7 +1100,7 @@ Transcript:
               background: 'linear-gradient(135deg, var(--secondary) 0%, #f43f5e 100%)'
             }}
           >
-            🐈‍⬛ Support This Project
+            🐈‍⬛ {t.header.supportProject}
           </a>
         </div>
       </header>
@@ -1106,12 +1110,12 @@ Transcript:
         <form onSubmit={handleAnalyze} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div className="form-main-input-row">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>YouTube Video URL</label>
+              <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t.form.urlLabel}</label>
               <input
                 id="youtube-url-input"
                 type="text"
                 className="form-input"
-                placeholder="Paste video link here (e.g. https://www.youtube.com/watch?v=... or shorts, youtu.be)"
+                placeholder={t.form.urlPlaceholder}
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 disabled={loading}
@@ -1130,14 +1134,14 @@ Transcript:
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="spinner-icon" style={{ animation: 'spin 1s linear infinite' }}>
                     <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="8"></circle>
                   </svg>
-                  Processing...
+                  {t.form.processing}
                 </>
               ) : (
                 <>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <polygon points="5 3 19 12 5 21 5 3"></polygon>
                   </svg>
-                  Hack Clips
+                  {t.form.hackClips}
                 </>
               )}
             </button>
@@ -1147,15 +1151,15 @@ Transcript:
             {/* Card 1: AI Engine Configuration */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1.25rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
               <h3 style={{ fontSize: '0.9rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
-                🤖 AI Engine Settings
+                🤖 {t.form.aiSettingsTitle}
               </h3>
               
               {/* API Key input — required */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                   <span>
-                    Gemini API Key
-                    <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', padding: '0.1rem 0.35rem', letterSpacing: '0.04em' }}>REQUIRED</span>
+                    {t.form.apiKeyLabel}
+                    <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', padding: '0.1rem 0.35rem', letterSpacing: '0.04em' }}>{t.form.apiKeyRequired}</span>
                   </span>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <a
@@ -1165,14 +1169,14 @@ Transcript:
                       style={{ color: 'var(--primary)', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600, transition: 'var(--transition-smooth)' }}
                       className="action-link-btn"
                     >
-                      🔑 Get free key
+                      🔑 {t.form.getFreeKey}
                     </a>
                     <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: '0.75rem' }}>|</span>
                     <span
                       onClick={() => setShowApiKey(!showApiKey)}
                       style={{ cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem' }}
                     >
-                      {showApiKey ? 'Hide key' : 'Show key'}
+                      {showApiKey ? t.form.hideKey : t.form.showKey}
                     </span>
                   </div>
                 </label>
@@ -1180,7 +1184,7 @@ Transcript:
                   id="gemini-key-input"
                   type={showApiKey ? 'text' : 'password'}
                   className={`form-input${!apiKey.trim() ? ' input-error-highlight' : ''}`}
-                  placeholder="Paste your Gemini API Key here — get one free at aistudio.google.com"
+                  placeholder={t.form.apiKeyPlaceholder}
                   value={apiKey}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -1194,7 +1198,7 @@ Transcript:
                 {!apiKey.trim() && (
                   <span style={{ fontSize: '0.75rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                    Required — saved locally in browser.
+                    {t.form.apiKeyErrorHint}
                   </span>
                 )}
               </div>
@@ -1202,10 +1206,10 @@ Transcript:
               {/* AI Model Selection */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <span>AI Model Selection</span>
+                  <span>{t.form.aiModelLabel}</span>
                   {loadingModels && (
                     <span style={{ fontSize: '0.72rem', color: 'var(--primary)', animation: 'pulse 1.5s infinite ease-in-out' }}>
-                      ⌛ Fetching available...
+                      ⌛ {t.form.fetchingModels}
                     </span>
                   )}
                 </label>
@@ -1236,7 +1240,7 @@ Transcript:
                   )}
                 </select>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4, marginTop: '0.2rem' }}>
-                  💡 <strong>Free Tier Resilience:</strong> If a model encounters quota limits or errors, Cheat Clip automatically tries all available Flash models (<strong>gemini-2.5-flash, 2.0-flash, 2.0-flash-lite, 1.5-flash</strong>) until clips are successfully found!
+                  💡 <strong>{t.form.resilienceTip}</strong> {t.form.resilienceDesc}
                 </span>
               </div>
             </div>
@@ -1244,12 +1248,12 @@ Transcript:
             {/* Card 2: Clip Parameters & Focus */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1.25rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
               <h3 style={{ fontSize: '0.9rem', color: 'var(--secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
-                ⚡ Clip Customization
+                ⚡ {t.form.clipCustomizationTitle}
               </h3>
 
               {/* Preferred Duration Selector */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Target Clip Duration</label>
+                <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t.form.targetDuration}</label>
                 <div className="duration-selector" id="duration-selector-group">
                   <button
                     type="button"
@@ -1257,7 +1261,7 @@ Transcript:
                     onClick={() => setDurationPref('15s')}
                     disabled={loading}
                   >
-                    ⚡ 15s clips
+                    {t.form.dur15s}
                   </button>
                   <button
                     type="button"
@@ -1265,7 +1269,7 @@ Transcript:
                     onClick={() => setDurationPref('30s')}
                     disabled={loading}
                   >
-                    🔥 30s clips
+                    {t.form.dur30s}
                   </button>
                   <button
                     type="button"
@@ -1273,7 +1277,7 @@ Transcript:
                     onClick={() => setDurationPref('60s')}
                     disabled={loading}
                   >
-                    🎬 60s clips
+                    {t.form.dur60s}
                   </button>
                 </div>
               </div>
@@ -1281,12 +1285,12 @@ Transcript:
               {/* Focus Prompt Search Keyword */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  Find Specific Moments <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 400 }}>(Optional)</span>
+                  {t.form.findSpecificMoments} <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 400 }}>{t.form.optional}</span>
                 </label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g., look for funny moments, controversial topics, technical explanation"
+                  placeholder={t.form.promptPlaceholder}
                   value={customPrompt}
                   onChange={(e) => setCustomPrompt(e.target.value)}
                   disabled={loading}
@@ -1298,7 +1302,7 @@ Transcript:
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                    Target Clip Count
+                    {t.form.targetClipCount}
                   </label>
                   <span style={{
                     fontSize: '0.8rem',
@@ -1309,7 +1313,7 @@ Transcript:
                     borderRadius: '6px',
                     padding: '0.1rem 0.5rem'
                   }}>
-                    ≈ {targetClipCount} Clips
+                    {t.form.approxClips(targetClipCount)}
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -1338,7 +1342,7 @@ Transcript:
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '20px', textAlign: 'right' }}>50</span>
                 </div>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
-                  💡 The AI will target around <strong>{targetClipCount}</strong> clips, adjusting dynamically (e.g., {targetClipCount <= 5 ? `${Math.max(1, targetClipCount - 1)}-${targetClipCount + 2}` : targetClipCount <= 10 ? `${Math.max(1, targetClipCount - 2)}-${targetClipCount + 3}` : `${targetClipCount - 5}-${targetClipCount + 5}`} clips) to ensure maximum quality without hard constraints.
+                  💡 {t.form.clipCountTip(targetClipCount, targetClipCount <= 5 ? `${Math.max(1, targetClipCount - 1)}-${targetClipCount + 2}` : targetClipCount <= 10 ? `${Math.max(1, targetClipCount - 2)}-${targetClipCount + 3}` : `${targetClipCount - 5}-${targetClipCount + 5}`)}
                 </span>
               </div>
             </div>
@@ -1346,7 +1350,7 @@ Transcript:
 
           {/* Subtitles Source Section */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem', marginTop: '0.5rem' }}>
-            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Subtitles Source</label>
+            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t.form.subtitlesSource}</label>
             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
                 <input
@@ -1357,7 +1361,7 @@ Transcript:
                   style={{ accentColor: 'var(--primary)' }}
                   disabled={loading}
                 />
-                Auto-fetch from YouTube
+                {t.form.autoFetchYoutube}
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
                 <input
@@ -1368,7 +1372,7 @@ Transcript:
                   style={{ accentColor: 'var(--primary)' }}
                   disabled={loading}
                 />
-                Upload Custom Subtitles (.srt, .txt)
+                {t.form.uploadCustomSubtitles}
               </label>
 
               {subtitlesSource === 'manual' && (
@@ -1387,7 +1391,7 @@ Transcript:
                       reader.onload = (evt) => {
                         const text = evt.target?.result as string;
                         setManualSubtitlesContent(text);
-                        setToastMessage(`Loaded: ${file.name}`);
+                        setToastMessage(t.form.subtitlesLoaded(file.name));
                         setTimeout(() => setToastMessage(null), 3000);
                       };
                       reader.readAsText(file);
@@ -1411,7 +1415,7 @@ Transcript:
                       transition: 'var(--transition-smooth)'
                     }}
                   >
-                    📂 Choose SRT/TXT File
+                    {t.form.chooseSrtTxt}
                   </label>
                   {manualSubtitlesFileName && (
                     <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '500' }}>
@@ -1424,14 +1428,14 @@ Transcript:
 
             {subtitlesSource === 'youtube' && (
               <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', opacity: 0.8, display: 'block', marginTop: '0.15rem', lineHeight: '1.4' }}>
-                💡 <strong>Hosting on Vercel?</strong> Serverless providers can get blocked when fetching auto-generated YouTube transcripts. If auto-fetch fails, download the subtitles manually using <a href="https://downsub.com/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--secondary)', textDecoration: 'underline', fontWeight: '500' }}>downsub.com</a> and upload them using the <strong>Upload Custom Subtitles</strong> option.
+                💡 <strong>{t.form.vercelSubtitlesTipTitle}</strong> {t.form.vercelSubtitlesTipDesc} <a href="https://downsub.com/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--secondary)', textDecoration: 'underline', fontWeight: '500' }}>downsub.com</a> {t.form.andUploadOption}
               </span>
             )}
           </div>
 
           {/* Custom Search Range Section */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem', marginTop: '0.5rem' }}>
-            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Analysis Range</label>
+            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>{t.form.analysisRange}</label>
             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
                 <input
@@ -1442,7 +1446,7 @@ Transcript:
                   style={{ accentColor: 'var(--primary)' }}
                   disabled={loading}
                 />
-                Entire Video
+                {t.form.entireVideo}
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
                 <input
@@ -1453,7 +1457,7 @@ Transcript:
                   style={{ accentColor: 'var(--primary)' }}
                   disabled={loading}
                 />
-                Custom Range
+                {t.form.customRange}
               </label>
 
               {rangeType === 'custom' && (
@@ -1461,17 +1465,17 @@ Transcript:
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Start (e.g. 29:00)"
+                    placeholder={t.form.startPlaceholder}
                     value={customRangeStart}
                     onChange={(e) => setCustomRangeStart(e.target.value)}
                     style={{ width: '150px', padding: '0.5rem 0.75rem', fontSize: '0.875rem' }}
                     disabled={loading}
                   />
-                  <span style={{ color: 'var(--text-muted)' }}>to</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{t.form.to}</span>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="End (e.g. 31:15)"
+                    placeholder={t.form.endPlaceholder}
                     value={customRangeEnd}
                     onChange={(e) => setCustomRangeEnd(e.target.value)}
                     style={{ width: '150px', padding: '0.5rem 0.75rem', fontSize: '0.875rem' }}
@@ -1482,7 +1486,7 @@ Transcript:
             </div>
             {rangeType === 'custom' && (
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                Supports format like <b>MM:SS</b> (e.g., 29:00), <b>HH:MM:SS</b>, or raw seconds (e.g., 600).
+                {t.form.rangeFormatHint}
               </span>
             )}
           </div>
@@ -1494,7 +1498,7 @@ Transcript:
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setShowHistory(h => !h)}>
               <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span style={{ fontSize: '1rem' }}>🕓</span>
-                Previously Analyzed Videos
+                {t.form.previouslyAnalyzed}
                 <span style={{ background: 'rgba(var(--primary-rgb, 168 85 247) / 0.15)', color: 'var(--primary)', fontSize: '0.7rem', fontWeight: 'bold', padding: '0.15rem 0.5rem', borderRadius: '20px', border: '1px solid rgba(168,85,247,0.3)' }}>
                   {history.length}
                 </span>
@@ -1506,7 +1510,7 @@ Transcript:
                     onClick={(e) => { e.stopPropagation(); clearAllHistory(); }}
                     style={{ fontSize: '0.75rem', color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', padding: '0.25rem 0.6rem', cursor: 'pointer' }}
                   >
-                    🗑 Clear All
+                    {t.form.clearAll}
                   </button>
                 )}
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{showHistory ? '▲' : '▼'}</span>
@@ -1543,7 +1547,7 @@ Transcript:
                         {entry.title}
                       </div>
                       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.2rem', fontSize: '0.73rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                        <span>🎬 {entry.clip_count} clips</span>
+                        <span>{t.form.clipsCountMeta(entry.clip_count)}</span>
                         <span>⏱ {entry.duration_pref}</span>
                         <span>🕓 {formatRelativeTime(entry.analyzed_at)}</span>
                       </div>
@@ -1563,7 +1567,7 @@ Transcript:
                       type="button"
                       onClick={(e) => deleteHistoryEntry(entry, e)}
                       style={{ flexShrink: 0, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', borderRadius: '6px', padding: '0.3rem 0.5rem', cursor: 'pointer', fontSize: '0.75rem' }}
-                      title="Remove from history"
+                      title={t.form.removeFromHistory}
                     >
                       ✕
                     </button>
@@ -1581,12 +1585,12 @@ Transcript:
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <span style={{ fontSize: '1.5rem', color: '#ef4444' }}>⚠️</span>
             <div>
-              <h4 style={{ color: '#ef4444' }}>Analysis Failed</h4>
+              <h4 style={{ color: '#ef4444' }}>{t.errors.analysisFailed}</h4>
               {error.toLowerCase().includes("no subtitles") ? (
                 <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.25rem', lineHeight: '1.5' }}>
-                  No subtitles could be retrieved for this video. Subtitles might be disabled, or the video may be age-restricted or private.
+                  {t.errors.noSubtitlesMsg}
                   <br /><br />
-                  💡 <strong>Tip for Serverless Deployment (Vercel):</strong> Serverless hosting providers can get blocked when fetching auto-generated YouTube transcripts. To resolve this, you can download the subtitles manually using a tool like <a href="https://downsub.com/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--secondary)', textDecoration: 'underline', fontWeight: '500' }}>downsub.com</a>, upload the file via the <strong>Upload custom subtitle</strong> settings above, and try analyzing the video again.
+                  💡 <strong>Tip for Serverless Deployment (Vercel):</strong> {t.errors.noSubtitlesTip}
                 </p>
               ) : (
                 <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>{error}</p>
@@ -1614,10 +1618,10 @@ Transcript:
           <div style={{ width: '100%', maxWidth: '620px' }}>
             <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
               <h3 style={{ marginBottom: '0.4rem', fontSize: '1.4rem' }} className="text-gradient">
-                Decoding Video Engagement
+                {t.loading.decodingEngagement}
               </h3>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>
-                Multimodal AI pipeline extracting viral retention spikes and hook sequences
+                {t.loading.decodingSubtitle}
               </p>
             </div>
 
@@ -1625,7 +1629,7 @@ Transcript:
             <div style={{ marginBottom: '2rem', padding: '0.85rem 1rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
                 <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Pipeline Overall Completion
+                  {t.loading.pipelineCompletion}
                 </span>
                 <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
                   {overallProgress}%
@@ -1650,7 +1654,7 @@ Transcript:
                 <div className="step-circle">{currentStep > 1 ? '✓' : '1'}</div>
                 <div className="step-content">
                   <div className="step-header-row">
-                    <span className="step-label">Extracting URL & YouTube video details</span>
+                    <span className="step-label">{t.loading.step1Label}</span>
                     <span className="step-percentage">
                       {currentStep > 1 ? '100%' : `${stepProgress[1] || 0}%`}
                     </span>
@@ -1662,7 +1666,7 @@ Transcript:
                     />
                   </div>
                   {currentStep === 1 && (
-                    <span className="step-subtext">Resolving video stream metadata, duration bounds, and title...</span>
+                    <span className="step-subtext">{t.loading.step1Subtext}</span>
                   )}
                 </div>
               </div>
@@ -1672,7 +1676,7 @@ Transcript:
                 <div className="step-circle">{currentStep > 2 ? '✓' : '2'}</div>
                 <div className="step-content">
                   <div className="step-header-row">
-                    <span className="step-label">Scraping audience retention heatmap data</span>
+                    <span className="step-label">{t.loading.step2Label}</span>
                     <span className="step-percentage">
                       {currentStep > 2 ? '100%' : currentStep === 2 ? `${stepProgress[2] || 0}%` : '0%'}
                     </span>
@@ -1684,7 +1688,7 @@ Transcript:
                     />
                   </div>
                   {currentStep === 2 && (
-                    <span className="step-subtext">Sampling 100 audience replay points & calculating engagement distribution...</span>
+                    <span className="step-subtext">{t.loading.step2Subtext}</span>
                   )}
                 </div>
               </div>
@@ -1694,7 +1698,7 @@ Transcript:
                 <div className="step-circle">{currentStep > 3 ? '✓' : '3'}</div>
                 <div className="step-content">
                   <div className="step-header-row">
-                    <span className="step-label">Retrieving subtitles & translating transcript</span>
+                    <span className="step-label">{t.loading.step3Label}</span>
                     <span className="step-percentage">
                       {currentStep > 3 ? '100%' : currentStep === 3 ? `${stepProgress[3] || 0}%` : '0%'}
                     </span>
@@ -1706,7 +1710,7 @@ Transcript:
                     />
                   </div>
                   {currentStep === 3 && (
-                    <span className="step-subtext">Aligning dialogue timestamps and sentences for precise audio cut boundaries...</span>
+                    <span className="step-subtext">{t.loading.step3Subtext}</span>
                   )}
                 </div>
               </div>
@@ -1716,7 +1720,7 @@ Transcript:
                 <div className="step-circle">{currentStep > 4 ? '✓' : '4'}</div>
                 <div className="step-content">
                   <div className="step-header-row">
-                    <span className="step-label">AI analysis & viral clip extraction</span>
+                    <span className="step-label">{t.loading.step4Label}</span>
                     <span className="step-percentage">
                       {currentStep === 4 ? `${stepProgress[4] || 0}%` : '0%'}
                     </span>
@@ -1733,40 +1737,40 @@ Transcript:
                       <div className="ai-activity-topbar">
                         <div className="ai-engine-badge">
                           <span style={{ fontSize: '0.85rem' }}>⚡</span>
-                          <span>AI Cognitive Engine</span>
+                          <span>{t.loading.aiEngineBadge}</span>
                           {activeProcessingModel && (
                             <span style={{ opacity: 0.85, fontWeight: 500 }}>({activeProcessingModel})</span>
                           )}
                         </div>
                         <div className="ai-timer-badge">
-                          <span>⏱️ {loadingElapsedTime}s elapsed</span>
+                          <span>{t.loading.timeElapsed(loadingElapsedTime)}</span>
                         </div>
                       </div>
 
                       <div>
                         <div className="ai-stage-title">
                           <span style={{ animation: 'spin 2.5s linear infinite', display: 'inline-block' }}>🧠</span>
-                          <span>{aiStage || 'Synthesizing Viral Highlights'}</span>
+                          <span>{aiStage || t.loading.synthesizingHighlights}</span>
                         </div>
                       </div>
 
                       <div className="ai-stage-detail">
-                        {aiDetail || loadingDetails || 'Evaluating audience drop-off gradients and sentence coherence...'}
+                        {aiDetail || loadingDetails || t.loading.evaluatingGradients}
                       </div>
 
                       {/* 4 Micro-phase progress pills */}
                       <div className="ai-subphases-row">
                         <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 25 ? 'completed' : (stepProgress[4] || 0) >= 5 ? 'active' : ''}`}>
-                          1. Heatmap Peaks
+                          {t.loading.subphase1}
                         </div>
                         <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 55 ? 'completed' : (stepProgress[4] || 0) >= 25 ? 'active' : ''}`}>
-                          2. Hook Extraction
+                          {t.loading.subphase2}
                         </div>
                         <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 80 ? 'completed' : (stepProgress[4] || 0) >= 55 ? 'active' : ''}`}>
-                          3. Virality Scoring
+                          {t.loading.subphase3}
                         </div>
                         <div className={`ai-subphase-pill ${(stepProgress[4] || 0) >= 95 ? 'completed' : (stepProgress[4] || 0) >= 80 ? 'active' : ''}`}>
-                          4. Social Metadata
+                          {t.loading.subphase4}
                         </div>
                       </div>
                     </div>
@@ -1820,7 +1824,7 @@ Transcript:
                     color: 'var(--text-primary)'
                   }}
                 >
-                  🔄 Refresh Player
+                  {t.results.refreshPlayer}
                 </button>
               </div>
 
@@ -1837,7 +1841,7 @@ Transcript:
             {/* AI Summary card */}
             <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', color: 'var(--primary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Video Summary</h3>
+                <h3 style={{ fontSize: '1.05rem', color: 'var(--primary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.results.videoSummary}</h3>
                 {(() => {
                   const { text, hashtags } = extractHashtagsAndText(result.summary);
                   return (
@@ -1872,7 +1876,7 @@ Transcript:
 
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
                 <h3 style={{ fontSize: '1.05rem', color: 'var(--secondary)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Generated Clips Overview ({result.clips.length})
+                  {t.results.generatedClipsOverview(result.clips.length)}
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '250px', overflowY: 'auto', paddingRight: '0.5rem' }}>
                   {result.clips.map((clip, idx) => {
@@ -1964,8 +1968,8 @@ Transcript:
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxHeight: leftPanelHeight ? `${leftPanelHeight}px` : '80vh' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ fontSize: '1.5rem', fontFamily: 'Outfit' }}>Recommended Clips</h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>SORT: {sortBy.toUpperCase()}</span>
+                <h2 style={{ fontSize: '1.5rem', fontFamily: 'Outfit' }}>{t.results.recommendedClips}</h2>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>{t.results.sortLabel(sortBy.toUpperCase())}</span>
               </div>
 
               {/* Analysis Metadata Info Bar */}
@@ -1984,21 +1988,21 @@ Transcript:
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <span style={{ fontSize: '1rem' }}>🤖</span>
-                  <span>AI Model:</span>
+                  <span>{t.results.aiModelBadge}</span>
                   <strong style={{ color: 'var(--primary)', fontWeight: 600 }}>
                     {result.model || selectedModel}
                   </strong>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <span style={{ fontSize: '1rem' }}>🎬</span>
-                  <span>Generated Clips:</span>
+                  <span>{t.results.generatedClipsBadge}</span>
                   <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
                     {result.clips.length}
                   </strong>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <span style={{ fontSize: '1rem' }}>🔖</span>
-                  <span>Marked Clips:</span>
+                  <span>{t.results.markedClipsBadge}</span>
                   <strong style={{ color: 'var(--secondary)', fontWeight: 600 }}>
                     {result.clips.filter(clip => !!markedClips[`${clip.start_time}_${clip.end_time}`]).length}
                   </strong>
@@ -2010,7 +2014,7 @@ Transcript:
                 <input
                   type="text"
                   className="form-input search-filter-input"
-                  placeholder="🔍 Search clips or transcripts..."
+                  placeholder={t.results.searchPlaceholder}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{ padding: '0.6rem 1rem', fontSize: '0.875rem' }}
@@ -2022,10 +2026,10 @@ Transcript:
                   onChange={(e) => setViralityFilter(e.target.value as any)}
                   style={{ width: 'auto', padding: '0.6rem 2rem 0.6rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
                 >
-                  <option value="all">🔥 All Scores</option>
-                  <option value="high">🚀 High (90%+)</option>
-                  <option value="medium">📈 Mid/Low (&lt;90%)</option>
-                  <option value="marked">🔖 Marked Only</option>
+                  <option value="all">{t.results.filterAllScores}</option>
+                  <option value="high">{t.results.filterHigh}</option>
+                  <option value="medium">{t.results.filterMidLow}</option>
+                  <option value="marked">{t.results.filterMarkedOnly}</option>
                 </select>
 
                 <select
@@ -2034,17 +2038,17 @@ Transcript:
                   onChange={(e) => setSortBy(e.target.value as any)}
                   style={{ width: 'auto', padding: '0.6rem 2rem 0.6rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
                 >
-                  <option value="virality">🔥 Sort: Virality</option>
-                  <option value="time">⏰ Sort: Chronological</option>
-                  <option value="duration">⏱️ Sort: Duration</option>
-                  <option value="marked">🔖 Sort: Marked</option>
+                  <option value="virality">{t.results.sortVirality}</option>
+                  <option value="time">{t.results.sortTime}</option>
+                  <option value="duration">{t.results.sortDuration}</option>
+                  <option value="marked">{t.results.sortMarked}</option>
                 </select>
               </div>
 
               {/* Stats and Exports */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                 <div>
-                  Showing {sortedClips.length} of {result.clips.length} clips
+                  {t.results.showingClipsCount(sortedClips.length, result.clips.length)}
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button
@@ -2053,7 +2057,7 @@ Transcript:
                     onClick={handleCopyAllMarkdown}
                     style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem' }}
                   >
-                    📋 Copy All (MD)
+                    {t.results.copyAllMd}
                   </button>
                   <span style={{ color: 'var(--border-color)' }}>|</span>
                   <button
@@ -2062,7 +2066,7 @@ Transcript:
                     onClick={handleExportJSON}
                     style={{ background: 'none', border: 'none', color: 'var(--secondary)', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem' }}
                   >
-                    📥 Download JSON
+                    {t.results.downloadJson}
                   </button>
                   {result.transcript && (
                     <>
@@ -2073,7 +2077,7 @@ Transcript:
                         onClick={handleExportSRT}
                         style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem' }}
                       >
-                        📥 Download SRT
+                        {t.results.downloadSrt}
                       </button>
                     </>
                   )}
@@ -2084,7 +2088,7 @@ Transcript:
             <div className="clips-list" style={{ maxHeight: 'none', flex: 1 }}>
               {sortedClips.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  No clips match the active filters. Try refining your search.
+                  {t.results.noClipsMatch}
                 </div>
               ) : (
                 sortedClips.map((clip, index) => {
@@ -2153,16 +2157,16 @@ Transcript:
                                 e.currentTarget.style.color = 'var(--text-secondary)';
                                 e.currentTarget.style.borderColor = 'var(--border-color)';
                               }}
-                              title="Copy Title to clipboard"
+                              title={t.results.copyTitleTooltip}
                             >
-                              📋 Copy
+                              📋 {t.results.copyMini}
                             </button>
                           </div>
                           <div className="score-meta" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                             <span className="timestamp-pill">
                               {formatSeconds(clip.start_time)} - {formatSeconds(clip.end_time)}
                             </span>
-                            <span>Duration: {formatSeconds(clip.end_time - clip.start_time)}</span>
+                            <span>{t.results.durationLabel(formatSeconds(clip.end_time - clip.start_time))}</span>
                             {clip.hook_time !== undefined && (
                               <span 
                                 onClick={(e) => {
@@ -2183,9 +2187,9 @@ Transcript:
                                   cursor: 'pointer',
                                   whiteSpace: 'nowrap'
                                 }}
-                                title="Click to jump to the potential hook timestamp"
+                                title={t.results.hookClickHint}
                               >
-                                🪝 Hook: {formatSeconds(clip.hook_time)}
+                                {t.results.hookLabel(formatSeconds(clip.hook_time))}
                               </span>
                             )}
                           </div>
@@ -2193,7 +2197,7 @@ Transcript:
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem' }}>
                           <div className={`score-badge ${clip.virality_score >= 90 ? 'score-high' : 'score-medium'}`}>
                             <span>🔥</span>
-                            <span>{clip.virality_score}% Virality</span>
+                            <span>{t.results.viralityBadge(clip.virality_score)}</span>
                           </div>
                           {!!markedClips[`${clip.start_time}_${clip.end_time}`] && (
                             <div style={{
@@ -2208,7 +2212,7 @@ Transcript:
                               borderRadius: '4px',
                               border: '1px solid var(--secondary)'
                             }}>
-                              ✓ MARKED
+                              {t.results.markedBadge}
                             </div>
                           )}
                         </div>
@@ -2229,7 +2233,7 @@ Transcript:
                           {clip.title_suggestion && (
                             <div className="suggestion-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                               <div style={{ flex: 1 }}>
-                                <span className="suggestion-label">💡 Title:</span>{' '}
+                                <span className="suggestion-label">{t.results.titlePrefix}</span>{' '}
                                 <span className="suggestion-value">{clip.title_suggestion}</span>
                               </div>
                               <button
@@ -2239,7 +2243,7 @@ Transcript:
                                   e.stopPropagation();
                                   handleCopyText(clip.title_suggestion!, 'Title');
                                 }}
-                                title="Copy Title"
+                                title={t.results.copyTitleTooltip}
                               >
                                 📋
                               </button>
@@ -2248,7 +2252,7 @@ Transcript:
                           {clip.caption_suggestion && (
                             <div className="suggestion-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                               <div style={{ flex: 1 }}>
-                                <span className="suggestion-label">📝 Caption:</span>{' '}
+                                <span className="suggestion-label">{t.results.captionPrefix}</span>{' '}
                                 <span className="suggestion-value">
                                   {(() => {
                                     const lowercaseHashtags = (clip.hashtag_suggestion || '').toLowerCase();
@@ -2272,7 +2276,7 @@ Transcript:
                                   })();
                                   handleCopyText(captionText, 'Caption');
                                 }}
-                                title="Copy Caption"
+                                title={t.results.copyCaptionTooltip}
                               >
                                 📋
                               </button>
@@ -2292,7 +2296,7 @@ Transcript:
                             playClip(clip);
                           }}
                         >
-                          ⚡ Preview Clip
+                          {t.results.previewClip}
                         </button>
 
                         <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -2302,12 +2306,12 @@ Transcript:
                             style={{ padding: '0.45rem 1rem', fontSize: '0.8rem', width: 'auto', borderRadius: '8px', cursor: 'pointer', background: 'transparent' }}
                             onClick={(e) => handleCopyClip(clip, e)}
                           >
-                            📋 Copy Timestamp
+                            {t.results.copyTimestamp}
                           </button>
                           <span
                             style={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}
                           >
-                            {isExpanded ? 'Hide Transcript ▲' : 'Show Transcript ▼'}
+                            {isExpanded ? t.results.hideTranscript : t.results.showTranscript}
                           </span>
                         </div>
                       </div>
@@ -2318,7 +2322,7 @@ Transcript:
                           className="transcript-box"
                           onClick={(e) => e.stopPropagation()} /* Prevents collapse */
                         >
-                          <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Transcript</div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>{t.results.transcriptTitle}</div>
                           {clip.transcript}
                         </div>
                       )}

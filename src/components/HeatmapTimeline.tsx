@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import type { HeatmapPoint } from '../types';
+import { useLanguage } from '../locales';
 
 interface HeatmapTimelineProps {
   duration: number;
@@ -16,6 +17,7 @@ export const HeatmapTimeline: React.FC<HeatmapTimelineProps> = ({
   onSeek,
   activeClip,
 }) => {
+  const { t } = useLanguage();
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverTime, setHoverTime] = useState<number>(0);
@@ -137,7 +139,7 @@ export const HeatmapTimeline: React.FC<HeatmapTimelineProps> = ({
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          Audience Retention Heatmap
+          {t.heatmap.title}
           {(!heatmap || heatmap.length === 0) && (
             <span style={{
               fontSize: '0.62rem',
@@ -147,7 +149,7 @@ export const HeatmapTimeline: React.FC<HeatmapTimelineProps> = ({
               padding: '0.1rem 0.4rem',
               borderRadius: '4px',
               border: '1px solid rgba(255,255,255,0.1)'
-            }}>Not available for this video</span>
+            }}>{t.heatmap.notAvailable}</span>
           )}
         </span>
         <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
@@ -285,7 +287,7 @@ export const HeatmapTimeline: React.FC<HeatmapTimelineProps> = ({
             <span style={{ fontWeight: 'bold' }}>{formatTime(hoverTime)}</span>
             {heatmap && heatmap.length > 0 && (
               <span style={{ color: 'var(--secondary)', fontSize: '0.6rem' }}>
-                Interest: {Math.round(hoverValue * 100)}%
+                {t.heatmap.interest(Math.round(hoverValue * 100))}
               </span>
             )}
           </div>
@@ -299,12 +301,12 @@ export const HeatmapTimeline: React.FC<HeatmapTimelineProps> = ({
           <span style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary)' }}></span>
-              Most Replayed peaks
+              {t.heatmap.mostReplayed}
             </span>
             {activeClip && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '2px', border: '1px dashed var(--secondary)', background: 'rgba(255, 94, 58, 0.1)' }}></span>
-                Active Clip Zone
+                {t.heatmap.activeClipZone}
               </span>
             )}
           </span>
