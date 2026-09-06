@@ -1269,29 +1269,36 @@ async def analyze_video(request: AnalyzeRequest):
                 err_str = str(error_to_report).lower()
                 if any(x in err_str for x in ('429', 'quota', 'resource exhausted', 'rate limit')):
                     yield _sse({
-                        "error": "Gemini API free quota/rate limit was reached across all Flash models. Free keys have a request limit per minute. Please wait 30–60 seconds and try again, or generate a new free key at aistudio.google.com.",
+                        "error": "Quota limit reached across all available Gemini Flash models for this API key. Free keys have a request limit per minute. Please change your API key, generate a fresh free key at aistudio.google.com, or wait 30–60 seconds before trying again.",
                         "status": 429
                     })
                 elif any(x in err_str for x in ('503', 'unavailable', 'overloaded')):
                     yield _sse({
-                        "error": "Google Gemini servers are currently experiencing high demand across all Flash models. Please wait a moment and try again.",
+                        "error": "Google Gemini servers are currently experiencing high demand across all Flash models. Please change to a different Gemini API key or wait a few moments and try again.",
                         "status": 503
                     })
                 elif any(x in err_str for x in ('401', '403', 'api_key', 'invalid', 'permission')):
                     yield _sse({
-                        "error": "Invalid Gemini API key or unauthorized. Please verify your API key at aistudio.google.com.",
+                        "error": "Invalid or restricted Gemini API key. Please change your API key or generate a new free key at aistudio.google.com.",
                         "status": 401
                     })
                 elif any(x in err_str for x in ('404', 'not found', 'not supported')):
+                    models_preview = ', '.join(models_to_try[:3])
                     yield _sse({
-                        "error": f"The selected AI model ({requested_model}) and all available fallback Flash models were unavailable in the Gemini API. Please check your API key at aistudio.google.com.",
+                        "error": f"All tested Gemini Flash models ({models_preview}...) were unavailable or not supported for this API key. Please change your Gemini API key or generate a new one at aistudio.google.com.",
                         "status": 404
                     })
                 else:
                     logger.error(f"Gemini error after all fallback models: {error_to_report}")
-                    yield _sse({"error": f"AI analysis failed across all available Flash models: {str(error_to_report)}", "status": 500})
+                    yield _sse({
+                        "error": f"AI analysis failed across all available Flash models ({str(error_to_report)}). Please change your Gemini API key or try again in a few moments.",
+                        "status": 500
+                    })
             else:
-                yield _sse({"error": "Gemini returned no response after trying all available Flash models.", "status": 500})
+                yield _sse({
+                    "error": "No response received after trying all available Gemini Flash models. Please change your Gemini API key or try again in a few moments.",
+                    "status": 500
+                })
             return
 
         # Fallback clip synthesis if 0 clips were returned after all models

@@ -71,6 +71,8 @@ export const en = {
     startLessThanEnd: "Start time must be less than end time.",
     chooseSubtitleFile: "Please choose or drag-and-drop a custom subtitle file (.srt or .txt).",
     analysisFailed: "Analysis Failed",
+    changeApiKeyAction: "Change API Key",
+    getNewKeyLink: "Get free key at Google AI Studio ↗",
     noSubtitlesMsg: "No subtitles could be retrieved for this video. Subtitles might be disabled, or the video may be age-restricted or private.",
     noSubtitlesTip: "Serverless hosting providers can get blocked when fetching auto-generated YouTube transcripts. To resolve this, you can download the subtitles manually using a tool like downsub.com, upload the file via the Upload custom subtitle settings above, and try analyzing the video again.",
   },

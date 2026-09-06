@@ -10,7 +10,7 @@ export const id: Translations = {
     urlPlaceholder: "Tempel tautan video di sini (misal: https://www.youtube.com/watch?v=... atau shorts, youtu.be)",
     hackClips: "Cari Klip",
     processing: "Memproses...",
-    
+
     // AI Engine settings
     aiSettingsTitle: "Pengaturan Mesin AI",
     apiKeyLabel: "Gemini API Key",
@@ -24,7 +24,7 @@ export const id: Translations = {
     fetchingModels: "Mengambil daftar model...",
     resilienceTip: "Ketahanan Kuota Gratis:",
     resilienceDesc: "Jika model mencapai batas kuota atau error, Cheat Clip secara dinamis mencoba seluruh model Flash baru maupun lama (3.x, 2.5, 2.0, 1.5) dari API key Anda hingga klip berhasil ditemukan!",
-    
+
     // Customization
     clipCustomizationTitle: "Kustomisasi Klip",
     targetDuration: "Durasi Target Klip",
@@ -37,7 +37,7 @@ export const id: Translations = {
     targetClipCount: "Target Jumlah Klip",
     approxClips: (count: number) => `≈ ${count} Klip`,
     clipCountTip: (target: number, rangeStr: string) => `AI akan menargetkan sekitar ${target} klip, menyesuaikan secara dinamis (contoh: ${rangeStr} klip) guna memastikan kualitas terbaik tanpa batasan kaku.`,
-    
+
     // Subtitles source
     subtitlesSource: "Sumber Subtitle",
     autoFetchYoutube: "Otomatis ambil dari YouTube",
@@ -73,6 +73,8 @@ export const id: Translations = {
     startLessThanEnd: "Waktu mulai harus lebih kecil dari waktu selesai.",
     chooseSubtitleFile: "Silakan pilih atau seret berkas subtitle (.srt atau .txt).",
     analysisFailed: "Analisis Gagal",
+    changeApiKeyAction: "Ganti API Key",
+    getNewKeyLink: "Dapatkan key gratis di Google AI Studio ↗",
     noSubtitlesMsg: "Tidak dapat mengambil subtitle untuk video ini. Subtitle mungkin dinonaktifkan, atau video dibatasi usia/bersifat privat.",
     noSubtitlesTip: "Penyedia hosting serverless terkadang diblokir saat mengambil transkrip YouTube otomatis. Untuk mengatasinya, unduh subtitle manual lewat downsub.com, unggah berkas melalui pengaturan Unggah Subtitle Manual di atas, lalu coba analisis kembali.",
   },
@@ -102,7 +104,7 @@ export const id: Translations = {
   results: {
     refreshPlayer: "🔄 Muat Ulang Pemutar",
     videoSummary: "Ringkasan Video",
-    generatedClipsOverview: (count: number) => `Ikhtisar Klip Dihasilkan (${count})`,
+    generatedClipsOverview: (count: number) => `Daftar Klip Dihasilkan (${count})`,
     recommendedClips: "Rekomendasi Klip Viral",
     sortLabel: (sortName: string) => `URUT: ${sortName}`,
     aiModelBadge: "Model AI:",
