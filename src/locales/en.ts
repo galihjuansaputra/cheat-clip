@@ -57,6 +57,14 @@ export const en = {
 
     // History
     previouslyAnalyzed: "Previously Analyzed Videos",
+    historySubtitle: "Instant access to cached video analyses and generated viral clips",
+    searchHistoryPlaceholder: "Search previous videos, clips, or quotes...",
+    noHistoryMatch: "No previous videos or clips match your search.",
+    clearSearch: "Clear",
+    showingHistoryCount: (shown: number, total: number) => `Showing ${shown} of ${total} analyses`,
+    matchedClipLabel: "Matched Clip",
+    matchedQuoteLabel: "Matched Quote",
+    loadVideo: "Load Analysis",
     clearAll: "🗑 Clear All",
     clipsCountMeta: (count: number) => `🎬 ${count} clips`,
     removeFromHistory: "Remove from history",

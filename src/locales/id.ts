@@ -58,7 +58,15 @@ export const id: Translations = {
     rangeFormatHint: "Mendukung format seperti MM:SS (misal: 29:00), HH:MM:SS, atau total detik (misal: 600).",
 
     // History
-    previouslyAnalyzed: "Riwayat Video yang Dianalisis",
+    previouslyAnalyzed: "Riwayat Video Dianalisis",
+    historySubtitle: "Akses instan ke analisis video tersimpan dan klip viral yang telah dibuat",
+    searchHistoryPlaceholder: "Cari riwayat video, klip, atau kutipan...",
+    noHistoryMatch: "Tidak ada riwayat video atau klip yang cocok dengan pencarian Anda.",
+    clearSearch: "Hapus",
+    showingHistoryCount: (shown: number, total: number) => `Menampilkan ${shown} dari ${total} analisis`,
+    matchedClipLabel: "Klip Cocok",
+    matchedQuoteLabel: "Kutipan Cocok",
+    loadVideo: "Muat Analisis",
     clearAll: "🗑 Hapus Semua",
     clipsCountMeta: (count: number) => `🎬 ${count} klip`,
     removeFromHistory: "Hapus dari riwayat",

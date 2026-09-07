@@ -147,9 +147,13 @@ export default function App() {
     thumbnail: string;
     url: string;
     range_suffix?: string;
+    summary?: string;
+    clip_titles?: string[];
+    key_quotes?: string[];
   }
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(true);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
 
   // Audio/video playback state tracking
   const [currentTime, setCurrentTime] = useState(0);
@@ -293,6 +297,9 @@ export default function App() {
           // Try reading cached timestamp stored separately
           const tsKey = `cheat_clip_ts_${video_id}_${duration_pref}${range_suffix}`;
           const analyzed_at = localStorage.getItem(tsKey) || new Date().toISOString();
+          const clip_titles = (data.clips || []).map((c: any) => c.title || '').filter(Boolean);
+          const key_quotes = (data.clips || []).flatMap((c: any) => c.key_quotes || []).filter(Boolean);
+
           entries.push({
             video_id,
             title: data.title,
@@ -301,7 +308,10 @@ export default function App() {
             analyzed_at,
             thumbnail: `https://img.youtube.com/vi/${video_id}/mqdefault.jpg`,
             url: `https://www.youtube.com/watch?v=${video_id}`,
-            range_suffix
+            range_suffix,
+            summary: data.summary || '',
+            clip_titles,
+            key_quotes
           });
         } catch (_) {
           // Skip malformed entries
@@ -1043,6 +1053,22 @@ Transcript:
     });
   }, [filteredClips, sortBy, markedClips]);
 
+  // Filter history entries based on query (matches video title, url, id, summary, clip titles, and quotes)
+  const filteredHistory = useMemo(() => {
+    if (!historySearchQuery.trim()) return history;
+    const q = historySearchQuery.trim().toLowerCase();
+    return history.filter(entry => {
+      const matchesVideoTitle = (entry.title || '').toLowerCase().includes(q);
+      const matchesUrl = (entry.url || '').toLowerCase().includes(q) || (entry.video_id || '').toLowerCase().includes(q);
+      const matchesDuration = (entry.duration_pref || '').toLowerCase().includes(q);
+      const matchesSummary = (entry.summary || '').toLowerCase().includes(q);
+      const matchesClips = (entry.clip_titles || []).some(t => t.toLowerCase().includes(q));
+      const matchesQuotes = (entry.key_quotes || []).some(k => k.toLowerCase().includes(q));
+
+      return matchesVideoTitle || matchesUrl || matchesDuration || matchesSummary || matchesClips || matchesQuotes;
+    });
+  }, [history, historySearchQuery]);
+
   // Smooth scroll active clip card into view in the sidebar list
   useEffect(() => {
     if (activeClip && sortedClips) {
@@ -1492,93 +1518,298 @@ Transcript:
             )}
           </div>
         </form>
+      </section>
 
-        {/* History toggle row */}
-        {history.length > 0 && (
-          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setShowHistory(h => !h)}>
-              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '1rem' }}>🕓</span>
-                {t.form.previouslyAnalyzed}
-                <span style={{ background: 'rgba(var(--primary-rgb, 168 85 247) / 0.15)', color: 'var(--primary)', fontSize: '0.7rem', fontWeight: 'bold', padding: '0.15rem 0.5rem', borderRadius: '20px', border: '1px solid rgba(168,85,247,0.3)' }}>
-                  {history.length}
-                </span>
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                {showHistory && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); clearAllHistory(); }}
-                    style={{ fontSize: '0.75rem', color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', padding: '0.25rem 0.6rem', cursor: 'pointer' }}
-                  >
-                    {t.form.clearAll}
-                  </button>
-                )}
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{showHistory ? '▲' : '▼'}</span>
+      {/* Detached & Highlighted Previous Analyses Section */}
+      {history.length > 0 && (
+        <section
+          className="history-highlight-panel"
+          aria-label="Previously analyzed clips"
+        >
+          {/* Header Row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setShowHistory(h => !h)}
+            >
+              <span style={{ fontSize: '1.5rem', filter: 'drop-shadow(0 0 8px rgba(168,85,247,0.5))' }}>🎬</span>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {t.form.previouslyAnalyzed}
+                  </h3>
+                  <span style={{
+                    background: 'rgba(168, 85, 247, 0.2)',
+                    color: '#c084fc',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    padding: '0.15rem 0.65rem',
+                    borderRadius: '9999px',
+                    border: '1px solid rgba(168, 85, 247, 0.45)'
+                  }}>
+                    {history.length}
+                  </span>
+                </div>
+                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  {t.form.historySubtitle}
+                </p>
               </div>
             </div>
 
-            {showHistory && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem', maxHeight: '300px', overflowY: 'auto', paddingRight: '0.25rem' }}>
-                {history.map((entry) => (
-                  <div
-                    key={`${entry.video_id}_${entry.duration_pref}`}
-                    onClick={() => loadFromHistory(entry)}
+            {/* Actions: Search bar, Clear All, Collapse Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              {/* Search Bar */}
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <span style={{ position: 'absolute', left: '0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                  🔍
+                </span>
+                <input
+                  type="text"
+                  className="history-search-input"
+                  placeholder={t.form.searchHistoryPlaceholder}
+                  value={historySearchQuery}
+                  onChange={(e) => setHistorySearchQuery(e.target.value)}
+                  style={{ paddingRight: historySearchQuery ? '2rem' : '0.85rem' }}
+                />
+                {historySearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setHistorySearchQuery('')}
                     style={{
-                      display: 'flex',
-                      gap: '0.75rem',
-                      alignItems: 'center',
-                      padding: '0.6rem 0.75rem',
-                      borderRadius: '8px',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid var(--border-color)',
+                      position: 'absolute',
+                      right: '0.6rem',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
                       cursor: 'pointer',
-                      transition: 'var(--transition-smooth)'
+                      fontSize: '0.85rem',
+                      padding: 0
                     }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(168,85,247,0.08)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                    title={t.form.clearSearch}
                   >
-                    <img
-                      src={entry.thumbnail}
-                      alt=""
-                      style={{ width: '72px', height: '42px', objectFit: 'cover', borderRadius: '5px', flexShrink: 0, background: '#111' }}
-                    />
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                      <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {entry.title}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.2rem', fontSize: '0.73rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-                        <span>{t.form.clipsCountMeta(entry.clip_count)}</span>
-                        <span>⏱ {entry.duration_pref}</span>
-                        <span>🕓 {formatRelativeTime(entry.analyzed_at)}</span>
-                      </div>
-                      <div style={{ marginTop: '0.15rem', fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        <a
-                          href={entry.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ color: 'var(--primary)', textDecoration: 'none', opacity: 0.75 }}
-                        >
-                          🔗 {entry.url}
-                        </a>
-                      </div>
-                    </div>
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Clear all */}
+              <button
+                type="button"
+                onClick={clearAllHistory}
+                style={{
+                  fontSize: '0.75rem',
+                  color: '#f87171',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '8px',
+                  padding: '0.45rem 0.75rem',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem'
+                }}
+              >
+                {t.form.clearAll}
+              </button>
+
+              {/* Toggle button */}
+              <button
+                type="button"
+                onClick={() => setShowHistory(h => !h)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-secondary)',
+                  borderRadius: '8px',
+                  padding: '0.45rem 0.7rem',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 600
+                }}
+                title={showHistory ? "Minimize" : "Expand"}
+              >
+                {showHistory ? '▲' : '▼'}
+              </button>
+            </div>
+          </div>
+
+          {/* Expanded content */}
+          {showHistory && (
+            <div style={{ marginTop: '1.25rem' }}>
+              {historySearchQuery.trim() && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{t.form.showingHistoryCount(filteredHistory.length, history.length)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setHistorySearchQuery('')}
+                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.78rem', textDecoration: 'underline' }}
+                  >
+                    {t.form.clearSearch}
+                  </button>
+                </div>
+              )}
+
+              {filteredHistory.length === 0 ? (
+                <div style={{
+                  padding: '2rem 1rem',
+                  textAlign: 'center',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  borderRadius: '12px',
+                  border: '1px dashed rgba(255, 255, 255, 0.1)'
+                }}>
+                  <span style={{ fontSize: '1.75rem', display: 'block', marginBottom: '0.5rem' }}>🔍</span>
+                  <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    {t.form.noHistoryMatch}
+                  </p>
+                  {historySearchQuery && (
                     <button
                       type="button"
-                      onClick={(e) => deleteHistoryEntry(entry, e)}
-                      style={{ flexShrink: 0, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', borderRadius: '6px', padding: '0.3rem 0.5rem', cursor: 'pointer', fontSize: '0.75rem' }}
-                      title={t.form.removeFromHistory}
+                      onClick={() => setHistorySearchQuery('')}
+                      style={{
+                        marginTop: '0.75rem',
+                        fontSize: '0.78rem',
+                        background: 'rgba(168, 85, 247, 0.15)',
+                        border: '1px solid rgba(168, 85, 247, 0.35)',
+                        color: '#c084fc',
+                        borderRadius: '6px',
+                        padding: '0.35rem 0.8rem',
+                        cursor: 'pointer'
+                      }}
                     >
-                      ✕
+                      {t.form.clearSearch}
                     </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxHeight: '420px', overflowY: 'auto', paddingRight: '0.35rem' }}>
+                  {filteredHistory.map((entry) => {
+                    const q = historySearchQuery.trim().toLowerCase();
+                    const matchedClip = q ? entry.clip_titles?.find(t => t.toLowerCase().includes(q)) : null;
+                    const matchedQuote = (!matchedClip && q) ? entry.key_quotes?.find(k => k.toLowerCase().includes(q)) : null;
+
+                    return (
+                      <div
+                        key={`${entry.video_id}_${entry.duration_pref}_${entry.range_suffix || ''}`}
+                        className="history-entry-card"
+                        onClick={() => loadFromHistory(entry)}
+                      >
+                        {/* Thumbnail with overlay duration badge */}
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <img
+                            src={entry.thumbnail}
+                            alt=""
+                            style={{ width: '84px', height: '48px', objectFit: 'cover', borderRadius: '7px', background: '#111', display: 'block' }}
+                          />
+                          <span style={{
+                            position: 'absolute',
+                            bottom: '3px',
+                            right: '3px',
+                            background: 'rgba(0, 0, 0, 0.75)',
+                            color: '#fff',
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            padding: '0.1rem 0.3rem',
+                            borderRadius: '4px',
+                            lineHeight: 1
+                          }}>
+                            {entry.duration_pref}
+                          </span>
+                        </div>
+
+                        {/* Title and details */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: '0.88rem',
+                            fontWeight: 600,
+                            color: 'var(--text-primary)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}>
+                            {entry.title}
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.65rem', marginTop: '0.25rem', fontSize: '0.74rem', color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--secondary)', fontWeight: 600 }}>{t.form.clipsCountMeta(entry.clip_count)}</span>
+                            <span>•</span>
+                            <span>⏱ {entry.duration_pref}</span>
+                            <span>•</span>
+                            <span>🕓 {formatRelativeTime(entry.analyzed_at)}</span>
+                            <span>•</span>
+                            <a
+                              href={entry.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: 'var(--primary)', textDecoration: 'none', opacity: 0.8 }}
+                            >
+                              🔗 YouTube
+                            </a>
+                          </div>
+
+                          {/* Matched clip/quote search preview */}
+                          {matchedClip && (
+                            <div style={{ fontSize: '0.72rem', color: '#c084fc', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <span style={{ fontWeight: 600 }}>✨ {t.form.matchedClipLabel}:</span>
+                              <span style={{ fontStyle: 'italic', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>"{matchedClip}"</span>
+                            </div>
+                          )}
+                          {matchedQuote && (
+                            <div style={{ fontSize: '0.72rem', color: '#38bdf8', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <span style={{ fontWeight: 600 }}>💬 {t.form.matchedQuoteLabel}:</span>
+                              <span style={{ fontStyle: 'italic', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>"{matchedQuote}"</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); loadFromHistory(entry); }}
+                            style={{
+                              background: 'rgba(168, 85, 247, 0.15)',
+                              border: '1px solid rgba(168, 85, 247, 0.4)',
+                              color: '#c084fc',
+                              borderRadius: '6px',
+                              padding: '0.35rem 0.75rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            ▶ {t.form.loadVideo}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => deleteHistoryEntry(entry, e)}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.08)',
+                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              color: '#ef4444',
+                              borderRadius: '6px',
+                              padding: '0.35rem 0.55rem',
+                              cursor: 'pointer',
+                              fontSize: '0.75rem'
+                            }}
+                            title={t.form.removeFromHistory}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Error state */}
       {error && (
