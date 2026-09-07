@@ -13,9 +13,10 @@
 
 - [✨ Features](#-features)
 - [⚡ Quick Start for Non-Programmers (Super Easy!)](#-quick-start-for-non-programmers-super-easy)
-  - [Prerequisites (Install These Two Free Tools)](#prerequisites-install-these-two-free-tools)
+  - [Prerequisites (Install These Free Tools)](#prerequisites-install-these-free-tools)
   - [Option A: One-Click Automatic Setup (Recommended)](#option-a-one-click-automatic-setup-recommended)
   - [Option B: Manual Step-by-Step Setup](#option-b-manual-step-by-step-setup)
+- [🔄 How to Update Cheat Clip (1-Click Update)](#-how-to-update-cheat-clip-1-click-update)
 - [🔑 How to Get a Free Google Gemini API Key](#-how-to-get-a-free-google-gemini-api-key)
 - [🎯 How to Use Cheat Clip](#-how-to-use-cheat-clip)
   - [Using the "Copy Timestamp" Features](#using-the-copy-timestamp-features)
@@ -49,26 +50,40 @@
 
 You don't need any programming experience to run Cheat Clip on your computer. Just follow these steps:
 
-### Prerequisites (Install These Two Free Tools)
+### Prerequisites (Install These Free Tools)
 
-Before running Cheat Clip for the first time, make sure your computer has **Node.js** and **Python**:
+Before running Cheat Clip for the first time, make sure your computer has these free tools:
 
-| Software | Where to Download | What to Do |
+| Software | Where to Download | Why & What to Do |
 |---|---|---|
-| **1. Node.js** | 👉 [Download Node.js (LTS)](https://nodejs.org/) | Download the **LTS (Recommended for Most Users)** installer, open it, and click **Next** until finished. |
-| **2. Python** | 👉 [Download Python](https://www.python.org/downloads/) | **CRITICAL FOR WINDOWS:** When the installer opens, check the box at the bottom that says **`☑ Add python.exe to PATH`** before clicking "Install Now"! |
+| **1. Git** *(Highly Recommended)* | 👉 [Download Git](https://git-scm.com/downloads) | **Makes future setup & updates 1-click simple!** Run the installer and click **Next** on all prompts with default settings. With Git installed, you can update Cheat Clip anytime just by double-clicking `update.bat` without ever re-downloading ZIP files. |
+| **2. Node.js** | 👉 [Download Node.js (LTS)](https://nodejs.org/) | Download the **LTS (Recommended for Most Users)** installer, open it, and click **Next** until finished. |
+| **3. Python** | 👉 [Download Python](https://www.python.org/downloads/) | **CRITICAL FOR WINDOWS:** When the Python installer opens, check the box at the bottom that says **`☑ Add python.exe to PATH`** before clicking "Install Now"! |
 
 > [!IMPORTANT]
-> If you are on Windows and forgot to check **`Add python.exe to PATH`**, Python won't work in the command line. If that happens, simply re-run the Python installer, select **Modify**, and check the PATH box.
+> **Windows Users:** If you forgot to check **`Add python.exe to PATH`**, Python won't work in the command prompt. If that happens, simply re-run the Python installer, select **Modify**, and check the PATH box.
+
+---
+
+### Step 1 — Get the Code
+
+- **With Git (Recommended):**
+  Open your command prompt or terminal and run:
+  ```bash
+  git clone https://github.com/your-username/cheat-clip.git
+  cd cheat-clip
+  ```
+- **Without Git:**
+  Click the green **"Code"** button at the top of the GitHub page, choose **"Download ZIP"**, and extract the ZIP file to any folder on your computer.
 
 ---
 
 ### Option A: One-Click Automatic Setup (Recommended)
 
-We've included automatic setup scripts so you don't have to type commands:
+We've included automatic setup scripts so you don't have to type terminal commands:
 
 #### On Windows:
-1. **Download or extract** the Cheat Clip folder onto your computer.
+1. Open the `cheat-clip` folder on your computer.
 2. Double-click the file named **`setup.bat`**.
    - A black window will open and automatically install everything needed.
    - When it says *"Setup Complete!"*, press any key to close the window.
@@ -112,6 +127,29 @@ If you prefer using the command prompt/terminal directly:
    ```
 5. **Open in browser**:
    Navigate to **[http://localhost:5173](http://localhost:5173)**.
+
+---
+
+## 🔄 How to Update Cheat Clip (1-Click Update)
+
+Whenever new features, bug fixes, or new Gemini AI models are released, you can easily update your installation if you have Git installed:
+
+### On Windows:
+- Simply double-click **`update.bat`**!
+- It will automatically download the newest code from GitHub, install any updated packages, and confirm when it's done. Then double-click `start.bat` as usual.
+
+### On macOS & Linux:
+- Run:
+  ```bash
+  bash update.sh
+  ```
+- Or run manually:
+  ```bash
+  git pull && npm install && python3 -m pip install -r backend/requirements.txt
+  ```
+
+> [!TIP]
+> This is why installing **Git** is so helpful: you never need to delete, re-download, or reconfigure anything when new updates come out!
 
 ---
 
@@ -177,6 +215,12 @@ Want to see how the app looks before getting an API key?
 ---
 
 ## 🛠️ Troubleshooting & FAQ (Beginner-Friendly)
+
+### ❓ "'git' is not recognized as an internal or external command"
+- **Why this happens:** Git is not installed yet or was installed while your command prompt was already open.
+- **Solution:** Download and install Git from [git-scm.com/downloads](https://git-scm.com/downloads), then close and re-open your terminal or command prompt window.
+
+---
 
 ### ❓ "'python' is not recognized as an internal or external command"
 - **Why this happens:** Python was installed without the PATH checkbox enabled.
@@ -297,8 +341,10 @@ Starts video scraping and AI extraction. Streams progress updates in real time u
 cheat-clip/
 ├── setup.bat                # ⚡ 1-click Windows installer
 ├── start.bat                # 🚀 1-click Windows launcher
+├── update.bat               # 🔄 1-click Windows updater (via Git)
 ├── setup.sh                 # ⚡ 1-click macOS/Linux installer
 ├── start.sh                 # 🚀 1-click macOS/Linux launcher
+├── update.sh                # 🔄 1-click macOS/Linux updater (via Git)
 ├── backend/
 │   ├── main.py              # FastAPI server, yt-dlp extractor, Gemini model fallback
 │   ├── requirements.txt     # Python backend dependencies
