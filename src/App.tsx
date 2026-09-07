@@ -163,6 +163,22 @@ export default function App() {
   const clipEndIntervalRef = useRef<number | null>(null);
   const loadingSectionRef = useRef<HTMLElement | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [copyTimestampMenuTarget, setCopyTimestampMenuTarget] = useState<'toolbar' | 'overview' | null>(null);
+
+  // Close timestamp format menu on click outside or escape
+  useEffect(() => {
+    if (!copyTimestampMenuTarget) return;
+    const handleClickOutside = () => setCopyTimestampMenuTarget(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCopyTimestampMenuTarget(null);
+    };
+    document.addEventListener('click', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [copyTimestampMenuTarget]);
 
   // Automatically scroll down to the loading progress section when analysis starts
   useEffect(() => {
@@ -936,6 +952,101 @@ Transcript:
       }, 3000);
     });
   };
+
+  const handleCopyTimestamp = (clip: ViralClip, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const ts = `${formatSeconds(clip.start_time)} - ${formatSeconds(clip.end_time)}`;
+    navigator.clipboard.writeText(ts).then(() => {
+      setToastMessage(t.results.copiedTimestampToast(ts));
+      setTimeout(() => setToastMessage(null), 3000);
+    });
+  };
+
+  const handleCopyAllTimestampsFormat = (format: 'only' | 'with_title' | 'youtube', e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setCopyTimestampMenuTarget(null);
+    if (!result || !result.clips || result.clips.length === 0) return;
+
+    let text = '';
+    if (format === 'only') {
+      text = result.clips
+        .map(clip => `${formatSeconds(clip.start_time)} - ${formatSeconds(clip.end_time)}`)
+        .join('\n');
+      setToastMessage(t.results.copiedTimestampsOnlyToast(result.clips.length));
+    } else if (format === 'with_title') {
+      text = result.clips
+        .map(clip => `${formatSeconds(clip.start_time)} - ${formatSeconds(clip.end_time)} | ${clip.title}`)
+        .join('\n');
+      setToastMessage(t.results.copiedTimestampsWithTitlesToast(result.clips.length));
+    } else if (format === 'youtube') {
+      text = result.clips
+        .map(clip => `${formatSeconds(clip.start_time)} ${clip.title}`)
+        .join('\n');
+      setToastMessage(t.results.copiedTimestampsYoutubeToast(result.clips.length));
+    }
+
+    navigator.clipboard.writeText(text).then(() => {
+      setTimeout(() => setToastMessage(null), 3000);
+    });
+  };
+
+  const toggleTimestampMenu = (target: 'toolbar' | 'overview', e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCopyTimestampMenuTarget(prev => prev === target ? null : target);
+  };
+
+  const renderTimestampFormatMenu = (align: 'left' | 'right' = 'right') => (
+    <div
+      className="timestamp-dropdown-menu"
+      onClick={(e) => e.stopPropagation()}
+      style={{ [align]: 0 }}
+    >
+      <div style={{ padding: '0.25rem 0.6rem 0.15rem', fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {t.results.copyAllTimestampsSelectFormat}
+      </div>
+
+      <button
+        type="button"
+        className="timestamp-menu-item"
+        onClick={(e) => handleCopyAllTimestampsFormat('only', e)}
+      >
+        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          {t.results.copyFormatOnlyTimestamps}
+        </span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          {t.results.copyFormatOnlyTimestampsDesc}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        className="timestamp-menu-item"
+        onClick={(e) => handleCopyAllTimestampsFormat('with_title', e)}
+      >
+        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          {t.results.copyFormatWithTitles}
+        </span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          {t.results.copyFormatWithTitlesDesc}
+        </span>
+      </button>
+
+      <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.07)', margin: '0.15rem 0' }} />
+
+      <button
+        type="button"
+        className="timestamp-menu-item"
+        onClick={(e) => handleCopyAllTimestampsFormat('youtube', e)}
+      >
+        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          {t.results.copyFormatYoutube}
+        </span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          {t.results.copyFormatYoutubeDesc}
+        </span>
+      </button>
+    </div>
+  );
 
   const handleExportJSON = () => {
     if (!result) return;
@@ -2210,9 +2321,47 @@ Transcript:
               </div>
 
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                <h3 style={{ fontSize: '1.05rem', color: 'var(--secondary)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {t.results.generatedClipsOverview(result.clips.length)}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h3 style={{ fontSize: '1.05rem', color: 'var(--secondary)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {t.results.generatedClipsOverview(result.clips.length)}
+                  </h3>
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <button
+                      type="button"
+                      onClick={(e) => toggleTimestampMenu('overview', e)}
+                      title={t.results.copyAllTimestampsTooltip}
+                      style={{
+                        fontSize: '0.72rem',
+                        padding: '0.2rem 0.55rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        borderRadius: '6px',
+                        background: copyTimestampMenuTarget === 'overview' ? 'rgba(255, 94, 58, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        border: `1px solid ${copyTimestampMenuTarget === 'overview' ? 'rgba(255, 94, 58, 0.5)' : 'var(--border-color)'}`,
+                        color: copyTimestampMenuTarget === 'overview' ? 'var(--secondary)' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        transition: 'var(--transition-smooth)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 94, 58, 0.12)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 94, 58, 0.4)';
+                        e.currentTarget.style.color = 'var(--secondary)';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (copyTimestampMenuTarget !== 'overview') {
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                          e.currentTarget.style.borderColor = 'var(--border-color)';
+                          e.currentTarget.style.color = 'var(--text-secondary)';
+                        }
+                      }}
+                    >
+                      {t.results.copyAllTimestamps} ▾
+                    </button>
+                    {copyTimestampMenuTarget === 'overview' && renderTimestampFormatMenu('right')}
+                  </div>
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '250px', overflowY: 'auto', paddingRight: '0.5rem' }}>
                   {result.clips.map((clip, idx) => {
                     const isSelected = activeClip?.start_time === clip.start_time && activeClip?.end_time === clip.end_time;
@@ -2282,13 +2431,29 @@ Transcript:
                           }}>
                             🔥 {clip.virality_score}%
                           </span>
-                          <span style={{
-                            color: 'var(--text-muted)',
-                            fontFamily: 'monospace',
-                            fontSize: '0.68rem',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            {formatSeconds(clip.start_time)} – {formatSeconds(clip.end_time)}
+                          <span
+                            onClick={(e) => handleCopyTimestamp(clip, e)}
+                            title={t.results.copyTimestampTooltip}
+                            style={{
+                              color: 'var(--text-muted)',
+                              fontFamily: 'monospace',
+                              fontSize: '0.68rem',
+                              whiteSpace: 'nowrap',
+                              cursor: 'pointer',
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = 'var(--secondary)';
+                              e.currentTarget.style.background = 'rgba(255, 94, 58, 0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = 'var(--text-muted)';
+                              e.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            ⏱️ {formatSeconds(clip.start_time)} – {formatSeconds(clip.end_time)}
                           </span>
                         </div>
                       </div>
@@ -2385,7 +2550,20 @@ Transcript:
                 <div>
                   {t.results.showingClipsCount(sortedClips.length, result.clips.length)}
                 </div>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <button
+                      type="button"
+                      className="action-link-btn"
+                      onClick={(e) => toggleTimestampMenu('toolbar', e)}
+                      title={t.results.copyAllTimestampsTooltip}
+                      style={{ background: 'none', border: 'none', color: 'var(--secondary)', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                    >
+                      {t.results.copyAllTimestamps} ▾
+                    </button>
+                    {copyTimestampMenuTarget === 'toolbar' && renderTimestampFormatMenu('left')}
+                  </div>
+                  <span style={{ color: 'var(--border-color)' }}>|</span>
                   <button
                     type="button"
                     className="action-link-btn"
@@ -2498,8 +2676,12 @@ Transcript:
                             </button>
                           </div>
                           <div className="score-meta" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            <span className="timestamp-pill">
-                              {formatSeconds(clip.start_time)} - {formatSeconds(clip.end_time)}
+                            <span
+                              className="timestamp-pill"
+                              onClick={(e) => handleCopyTimestamp(clip, e)}
+                              title={t.results.copyTimestampTooltip}
+                            >
+                              ⏱️ {formatSeconds(clip.start_time)} - {formatSeconds(clip.end_time)}
                             </span>
                             <span>{t.results.durationLabel(formatSeconds(clip.end_time - clip.start_time))}</span>
                             {clip.hook_time !== undefined && (
@@ -2634,14 +2816,23 @@ Transcript:
                           {t.results.previewClip}
                         </button>
 
-                        <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
                           <button
                             type="button"
                             className="form-input"
-                            style={{ padding: '0.45rem 1rem', fontSize: '0.8rem', width: 'auto', borderRadius: '8px', cursor: 'pointer', background: 'transparent' }}
-                            onClick={(e) => handleCopyClip(clip, e)}
+                            style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', width: 'auto', borderRadius: '8px', cursor: 'pointer', background: 'transparent' }}
+                            onClick={(e) => handleCopyTimestamp(clip, e)}
+                            title={t.results.copyTimestampTooltip}
                           >
                             {t.results.copyTimestamp}
+                          </button>
+                          <button
+                            type="button"
+                            className="form-input"
+                            style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', width: 'auto', borderRadius: '8px', cursor: 'pointer', background: 'transparent' }}
+                            onClick={(e) => handleCopyClip(clip, e)}
+                          >
+                            {t.results.copyDetails}
                           </button>
                           <span
                             style={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}
