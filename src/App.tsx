@@ -154,6 +154,7 @@ export default function App() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(true);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   // Audio/video playback state tracking
   const [currentTime, setCurrentTime] = useState(0);
@@ -1592,27 +1593,83 @@ Transcript:
                 )}
               </div>
 
-              {/* Clear all */}
-              <button
-                type="button"
-                onClick={clearAllHistory}
-                style={{
-                  fontSize: '0.75rem',
-                  color: '#f87171',
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  borderRadius: '8px',
-                  padding: '0.45rem 0.75rem',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  transition: 'all 0.2s ease',
+              {/* Clear all with confirmation */}
+              {confirmClearAll ? (
+                <div style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.3rem'
-                }}
-              >
-                {t.form.clearAll}
-              </button>
+                  gap: '0.45rem',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  padding: '0.25rem 0.55rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  animation: 'fadeIn 0.2s ease'
+                }}>
+                  <span style={{ fontSize: '0.74rem', color: '#fca5a5', fontWeight: 600 }}>
+                    ⚠️ {t.form.areYouSure}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearAllHistory();
+                      setConfirmClearAll(false);
+                    }}
+                    style={{
+                      fontSize: '0.74rem',
+                      color: '#fff',
+                      background: '#ef4444',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '0.25rem 0.55rem',
+                      cursor: 'pointer',
+                      fontWeight: 700,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.2rem',
+                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.4)'
+                    }}
+                  >
+                    ✓ {t.form.confirmClear}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearAll(false)}
+                    style={{
+                      fontSize: '0.74rem',
+                      color: 'var(--text-secondary)',
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '6px',
+                      padding: '0.25rem 0.45rem',
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
+                  >
+                    ✕ {t.form.cancel}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearAll(true)}
+                  style={{
+                    fontSize: '0.75rem',
+                    color: '#f87171',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: '8px',
+                    padding: '0.45rem 0.75rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    transition: 'all 0.2s ease',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem'
+                  }}
+                >
+                  {t.form.clearAll}
+                </button>
+              )}
 
               {/* Toggle button */}
               <button
