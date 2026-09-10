@@ -70,7 +70,7 @@ Before running Cheat Clip for the first time, make sure your computer has these 
 - **With Git (Recommended):**
   Open your command prompt or terminal and run:
   ```bash
-  git clone https://github.com/your-username/cheat-clip.git
+  git clone https://github.com/galihjuansaputra/cheat-clip.git
   cd cheat-clip
   ```
 - **Without Git:**
