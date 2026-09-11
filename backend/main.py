@@ -93,6 +93,7 @@ class AnalyzeRequest(BaseModel):
     subtitles: Optional[str] = Field(None, description="Optional manual subtitles text (SRT or TXT)")
     subtitles_filename: Optional[str] = Field(None, description="Optional manual subtitles filename")
     target_clip_count: Optional[int] = Field(None, description="Optional target number of clips (1-50)")
+    proxy: Optional[str] = Field(None, description="Optional custom HTTP/HTTPS/SOCKS proxy URL")
 
 class HeatmapPoint(BaseModel):
     start_time: float
@@ -264,14 +265,74 @@ def extract_video_id(url: str) -> Optional[str]:
     return None
 
 def get_proxy_url() -> Optional[str]:
-    """Retrieves proxy URL from environment variables (PROXY_URL or WEBSHARE_PROXY)."""
-    proxy = os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXY") or ""
+    """Retrieves proxy URL from environment variables (PROXY_URL, WEBSHARE_PROXY, HTTPS_PROXY, HTTP_PROXY)."""
+    proxy = (
+        os.environ.get("PROXY_URL")
+        or os.environ.get("WEBSHARE_PROXY")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("ALL_PROXY")
+        or ""
+    )
     return proxy.strip() or None
 
-def fetch_video_metadata(url: str):
-    """Fetches video title, duration, and viewer retention heatmap using yt-dlp."""
-    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+def get_youtube_oembed_title(video_id_or_url: str) -> Optional[str]:
+    """Fetches video title directly from YouTube's public oEmbed API.
+    Fast (<300ms), requires no authentication or cookies, and works reliably when yt-dlp is blocked."""
+    import requests
+    video_id = extract_video_id(video_id_or_url) if ("youtube" in video_id_or_url or "youtu.be" in video_id_or_url or "/" in video_id_or_url) else video_id_or_url
+    if not video_id:
+        return None
+    
+    # 1. Try direct HTTP GET to oEmbed endpoint
+    try:
+        resp = requests.get(
+            f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json",
+            timeout=5
+        )
+        if resp.status_code == 200:
+            title = resp.json().get("title")
+            if title and title.strip():
+                return title.strip()
+    except Exception as e:
+        logger.warning(f"Direct oEmbed title fetch failed for {video_id}: {e}")
+
+    # 2. Try via proxy if configured
     proxy = get_proxy_url()
+    if proxy:
+        try:
+            resp = requests.get(
+                f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json",
+                proxies={"http": proxy, "https": proxy},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                title = resp.json().get("title")
+                if title and title.strip():
+                    return title.strip()
+        except Exception as e:
+            logger.warning(f"Proxy oEmbed title fetch failed for {video_id}: {e}")
+
+    # 3. Direct HTML title scraping fallback
+    try:
+        resp = requests.get(f"https://www.youtube.com/watch?v={video_id}", timeout=5)
+        if resp.status_code == 200:
+            m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', resp.text)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+            m2 = re.search(r'<title>(.*?)(?:\s*-\s*YouTube)?</title>', resp.text)
+            if m2 and m2.group(1).strip():
+                return m2.group(1).strip()
+    except Exception:
+        pass
+
+    return None
+
+def fetch_video_metadata(url: str, custom_proxy: Optional[str] = None):
+    """Fetches video title, duration, and viewer retention heatmap using yt-dlp with oEmbed title fallback."""
+    is_vercel = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    proxy = custom_proxy or get_proxy_url()
+    video_id = extract_video_id(url)
     
     # On Vercel, YouTube blocks direct datacenter IPs, so try proxy first if configured; locally try direct first
     attempts = [proxy, None] if (is_vercel and proxy) else [None, proxy] if proxy else [None]
@@ -291,8 +352,12 @@ def fetch_video_metadata(url: str):
                 info = ydl.extract_info(url, download=False)
                 if not info:
                     raise Exception("yt-dlp returned empty info dict")
+                title = info.get('title')
+                if not title or title.lower() == 'unknown youtube video':
+                    if video_id:
+                        title = get_youtube_oembed_title(video_id) or title
                 return {
-                    "title": info.get('title') or 'Unknown YouTube Video',
+                    "title": title or 'Unknown YouTube Video',
                     "duration": float(info.get('duration') or 0.0),
                     "heatmap": info.get('heatmap') or [],
                     "is_live": bool(info.get('is_live') or False),
@@ -302,11 +367,11 @@ def fetch_video_metadata(url: str):
             logger.warning(f"yt-dlp metadata extraction failed (proxy={'yes' if attempt_proxy else 'no'}): {e}")
             continue
 
-    # Fallback to URL video ID parsing if yt-dlp fails
-    video_id = extract_video_id(url)
+    # Fallback to oEmbed and URL video ID parsing if yt-dlp fails
     if video_id:
+        fallback_title = get_youtube_oembed_title(video_id)
         return {
-            "title": f"YouTube Video ({video_id})",
+            "title": fallback_title or f"YouTube Video ({video_id})",
             "duration": 0.0,
             "heatmap": [],
             "is_live": False,
@@ -376,17 +441,17 @@ def fetch_transcript_supadata(video_id: str) -> List[dict]:
     return []
 
 
-def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
-    """Attempts to extract captions using yt-dlp's player response directly (free, no quota used)."""
+def fetch_transcript_ytdlp(video_id: str, proxy: Optional[str] = None) -> List[dict]:
+    """Attempts to extract captions using yt-dlp's player response directly (free, no quota used).
+    Can be run direct (proxy=None) or routed through a proxy."""
     import requests
-    proxy = get_proxy_url()
     ydl_opts = {
         'skip_download': True,
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'proxy': proxy,
-        'socket_timeout': 8
+        'socket_timeout': 10
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -400,15 +465,17 @@ def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
             priority_langs = ['id', 'en', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'ar', 'hi', 'ru']
             # Search manual first, then automatic captions
             for lang_dict, is_auto in [(subtitles, False), (auto_subtitles, True)]:
-                for lang in priority_langs:
+                langs_to_try = [l for l in priority_langs if l in lang_dict] + [l for l in lang_dict if l not in priority_langs]
+                for lang in langs_to_try:
                     formats = lang_dict.get(lang) or []
                     json3_entry = next((f['url'] for f in formats if f.get('ext') == 'json3'), None)
                     if json3_entry:
-                        # Try direct first, then proxy if needed
+                        # Try proxy if provided, then direct fallback (or direct only if no proxy)
                         proxies_dict = {'http': proxy, 'https': proxy} if proxy else None
-                        for p in [None, proxies_dict]:
+                        attempts = [proxies_dict, None] if proxy else [None]
+                        for p in attempts:
                             try:
-                                r = requests.get(json3_entry, proxies=p, timeout=5)
+                                r = requests.get(json3_entry, proxies=p, timeout=8)
                                 if r.status_code == 200:
                                     events = r.json().get('events', [])
                                     result = []
@@ -420,18 +487,26 @@ def fetch_transcript_ytdlp(video_id: str) -> List[dict]:
                                             dur = ev.get('dDurationMs', 0) / 1000.0
                                             result.append({'text': text, 'start': start, 'duration': dur})
                                     if result:
-                                        logger.info(f"Transcript fetched via yt-dlp (lang={lang}, auto={is_auto})")
+                                        logger.info(f"Transcript fetched via yt-dlp (lang={lang}, auto={is_auto}, proxy={'yes' if p else 'no'})")
                                         return result
                             except Exception:
                                 continue
     except Exception as e:
-        logger.warning(f"yt-dlp subtitle extraction failed: {e}")
+        logger.warning(f"yt-dlp subtitle extraction failed (proxy={'yes' if proxy else 'no'}): {e}")
     return []
 
 
-def fetch_transcript(video_id: str) -> List[dict]:
-    """Retrieves subtitles. On Vercel / serverless cloud environments, prioritizes rotating Supadata
-    to avoid datacenter IP bans and 10s execution timeouts. Locally, prioritizes free direct fetch."""
+def fetch_transcript(video_id: str, custom_proxy: Optional[str] = None) -> List[dict]:
+    """Retrieves subtitles.
+    On Vercel / serverless cloud environments, prioritizes rotating Supadata
+    to avoid datacenter IP bans and 10s execution timeouts. Locally, prioritizes free direct fetch first:
+      1. Direct YouTubeTranscriptApi.fetch() (priority languages, no proxy)
+      2. Direct YouTubeTranscriptApi.list() (manual and auto captions, no proxy)
+      3. Direct yt-dlp native extraction (no proxy)
+      4. Supadata API fallback (if configured)
+    If all standard strategies fail to retrieve subtitles:
+      5. Fallback to using proxy as the last resort to try.
+    """
 
     def to_dict_list(fetched) -> List[dict]:
         return [
@@ -488,8 +563,8 @@ def fetch_transcript(video_id: str) -> List[dict]:
     except Exception as e:
         logger.warning(f"Could not list transcripts: {e}")
 
-    # ── Strategy 3: yt-dlp native extraction fallback ──────────────────────────
-    ytdlp_data = fetch_transcript_ytdlp(video_id)
+    # ── Strategy 3: yt-dlp native extraction fallback (direct, free, no proxy) ──
+    ytdlp_data = fetch_transcript_ytdlp(video_id, proxy=None)
     if ytdlp_data:
         return ytdlp_data
 
@@ -499,11 +574,58 @@ def fetch_transcript(video_id: str) -> List[dict]:
         if supadata_data:
             return supadata_data
 
+    # ── Strategy 5: Proxy Fallback as Last Resort ─────────────────────────────
+    # When all direct scraping and API strategies fail to fetch subtitles,
+    # attempt retrieval using proxy as the last resort to try.
+    proxy = custom_proxy or get_proxy_url()
+    if proxy:
+        masked_proxy = proxy.split('@')[-1] if '@' in proxy else proxy
+        logger.info(f"Standard subtitle retrieval failed — falling back to proxy as last resort ({masked_proxy})...")
+
+        # 5a. yt-dlp native extraction routed through proxy
+        try:
+            proxy_ytdlp_data = fetch_transcript_ytdlp(video_id, proxy=proxy)
+            if proxy_ytdlp_data:
+                logger.info(f"Transcript fetched via proxy fallback (yt-dlp): {len(proxy_ytdlp_data)} lines")
+                return proxy_ytdlp_data
+        except Exception as e:
+            logger.warning(f"Proxy fallback via yt-dlp failed: {e}")
+
+        # 5b. YouTubeTranscriptApi routed through GenericProxyConfig
+        try:
+            from youtube_transcript_api.proxies import GenericProxyConfig
+            proxy_cfg = GenericProxyConfig(http_url=proxy, https_url=proxy)
+            proxy_api = YouTubeTranscriptApi(proxy_config=proxy_cfg)
+            try:
+                data = to_dict_list(proxy_api.fetch(video_id, languages=priority_langs))
+                if data:
+                    logger.info(f"Transcript fetched via proxy fallback (YouTubeTranscriptApi direct): {len(data)} lines")
+                    return data
+            except Exception as e:
+                logger.info(f"Proxy YouTubeTranscriptApi direct missed: {e}")
+
+            try:
+                for t in list(proxy_api.list(video_id)):
+                    try:
+                        data = to_dict_list(t.fetch())
+                        if data:
+                            logger.info(f"Transcript fetched via proxy fallback (YouTubeTranscriptApi list {t.language}): {len(data)} lines")
+                            return data
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.info(f"Proxy YouTubeTranscriptApi list missed: {e}")
+        except Exception as e:
+            logger.warning(f"Proxy fallback via YouTubeTranscriptApi failed: {e}")
+    else:
+        logger.info("No proxy configured (PROXY_URL or WEBSHARE_PROXY) to attempt proxy fallback.")
+
     # ── All strategies exhausted ──────────────────────────────────────────────
     raise HTTPException(
         status_code=400,
         detail=(
             "No subtitles could be retrieved for this video. "
+            "All standard methods and proxy fallback were exhausted. "
             "Subtitles might be disabled, or the video may be age-restricted, private, or require a login."
         )
     )
@@ -570,6 +692,14 @@ def health_check():
         "proxy_configured": bool(proxy),
         "gemini_env_configured": has_gemini
     }
+
+@app.get("/api/video-title")
+def get_video_title_endpoint(video_id: str):
+    """Retrieves real video title using YouTube oEmbed or fallback."""
+    title = get_youtube_oembed_title(video_id)
+    if not title:
+        title = f"YouTube Video ({video_id})"
+    return {"video_id": video_id, "title": title}
 
 
 
@@ -728,7 +858,7 @@ async def analyze_video(request: AnalyzeRequest):
         })
 
         try:
-            metadata = await asyncio.to_thread(fetch_video_metadata, request.url)
+            metadata = await asyncio.to_thread(fetch_video_metadata, request.url, request.proxy)
             title    = metadata["title"]
             duration = metadata["duration"]
             heatmap  = metadata.get("heatmap") or []
@@ -827,7 +957,7 @@ async def analyze_video(request: AnalyzeRequest):
                 "message": "Fetching subtitles — trying video's original language..."
             })
             try:
-                transcript_lines = await asyncio.to_thread(fetch_transcript, video_id)
+                transcript_lines = await asyncio.to_thread(fetch_transcript, video_id, request.proxy)
                 yield _sse({
                     "step": 3,
                     "step_progress": 100,

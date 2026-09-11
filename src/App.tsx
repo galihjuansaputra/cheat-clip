@@ -139,6 +139,7 @@ export default function App() {
 
   // History feature: previously analyzed videos from localStorage
   interface HistoryEntry {
+    cache_key: string;
     video_id: string;
     title: string;
     duration_pref: string;
@@ -295,6 +296,8 @@ export default function App() {
   // Scan localStorage and build the history list from cache keys
   const refreshHistory = () => {
     const entries: HistoryEntry[] = [];
+    const keysToResolve: { cacheKey: string; videoId: string }[] = [];
+
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith('cheat_clip_cache_')) {
@@ -317,7 +320,13 @@ export default function App() {
           const clip_titles = (data.clips || []).map((c: any) => c.title || '').filter(Boolean);
           const key_quotes = (data.clips || []).flatMap((c: any) => c.key_quotes || []).filter(Boolean);
 
+          const isPlaceholder = !data.title || data.title.startsWith('YouTube Video (') || data.title === 'Unknown YouTube Video';
+          if (isPlaceholder && video_id) {
+            keysToResolve.push({ cacheKey: key, videoId: video_id });
+          }
+
           entries.push({
+            cache_key: key,
             video_id,
             title: data.title,
             duration_pref,
@@ -338,6 +347,35 @@ export default function App() {
     // Sort by most recent first
     entries.sort((a, b) => new Date(b.analyzed_at).getTime() - new Date(a.analyzed_at).getTime());
     setHistory(entries);
+
+    // Asynchronously resolve real titles for any placeholder entries and update cache + state
+    if (keysToResolve.length > 0) {
+      keysToResolve.forEach(({ cacheKey, videoId }) => {
+        fetch(`/api/video-title?video_id=${encodeURIComponent(videoId)}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(resData => {
+            if (resData && resData.title && !resData.title.startsWith('YouTube Video (')) {
+              // Update localStorage cache
+              const currentRaw = localStorage.getItem(cacheKey);
+              if (currentRaw) {
+                try {
+                  const parsed = JSON.parse(currentRaw);
+                  parsed.title = resData.title;
+                  localStorage.setItem(cacheKey, JSON.stringify(parsed));
+                } catch (_) {}
+              }
+              // Update history state
+              setHistory(prev => prev.map(item => {
+                if (item.cache_key === cacheKey || (item.video_id === videoId && (!item.title || item.title.startsWith('YouTube Video (')))) {
+                  return { ...item, title: resData.title };
+                }
+                return item;
+              }));
+            }
+          })
+          .catch(() => {});
+      });
+    }
   };
 
   // Load history on mount
@@ -347,7 +385,7 @@ export default function App() {
 
   const loadFromHistory = (entry: HistoryEntry) => {
     const rangeSuffix = entry.range_suffix || '';
-    const cacheKey = `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
+    const cacheKey = entry.cache_key || `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
     const raw = localStorage.getItem(cacheKey);
     if (!raw) return;
     try {
@@ -421,12 +459,13 @@ export default function App() {
   const deleteHistoryEntry = (entry: HistoryEntry, e: React.MouseEvent) => {
     e.stopPropagation();
     const rangeSuffix = entry.range_suffix || '';
-    const cacheKey = `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
-    const tsKey = `cheat_clip_ts_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
+    const cacheKey = entry.cache_key || `cheat_clip_cache_${entry.video_id}_${entry.duration_pref}${rangeSuffix}`;
+    const tsKey = cacheKey.replace('cheat_clip_cache_', 'cheat_clip_ts_');
     localStorage.removeItem(cacheKey);
     localStorage.removeItem(tsKey);
     refreshHistory();
-    setToastMessage(t.form.removedFromHistory(entry.title));
+    const displayTitle = displayTitleMap.get(entry.cache_key) || entry.title;
+    setToastMessage(t.form.removedFromHistory(displayTitle));
     setTimeout(() => setToastMessage(null), 3000);
   };
 
@@ -1165,12 +1204,45 @@ Transcript:
     });
   }, [filteredClips, sortBy, markedClips]);
 
+  // Precompute duplicate titles map: if multiple entries have the same title (or same video_id),
+  // append [1], [2], etc. chronologically based on analyzed_at (oldest is [1], newer is [2], etc.)
+  const displayTitleMap = useMemo(() => {
+    const groups: { [key: string]: HistoryEntry[] } = {};
+    for (const entry of history) {
+      const baseTitle = (entry.title || entry.video_id || '').replace(/\s*\[\d+\]$/, '').trim().toLowerCase();
+      if (!groups[baseTitle]) {
+        groups[baseTitle] = [];
+      }
+      groups[baseTitle].push(entry);
+    }
+
+    const titleMap = new Map<string, string>(); // cache_key -> display title
+    for (const key in groups) {
+      const group = groups[key];
+      if (group.length === 1) {
+        const e = group[0];
+        titleMap.set(e.cache_key, e.title);
+      } else {
+        // Sort chronologically ascending (oldest analysis is [1], next is [2], etc.)
+        const sorted = [...group].sort(
+          (a, b) => new Date(a.analyzed_at).getTime() - new Date(b.analyzed_at).getTime()
+        );
+        sorted.forEach((e, idx) => {
+          const cleanTitle = (e.title || e.video_id || '').replace(/\s*\[\d+\]$/, '').trim();
+          titleMap.set(e.cache_key, `${cleanTitle} [${idx + 1}]`);
+        });
+      }
+    }
+    return titleMap;
+  }, [history]);
+
   // Filter history entries based on query (matches video title, url, id, summary, clip titles, and quotes)
   const filteredHistory = useMemo(() => {
     if (!historySearchQuery.trim()) return history;
     const q = historySearchQuery.trim().toLowerCase();
     return history.filter(entry => {
-      const matchesVideoTitle = (entry.title || '').toLowerCase().includes(q);
+      const displayTitle = displayTitleMap.get(entry.cache_key) || entry.title || '';
+      const matchesVideoTitle = (entry.title || '').toLowerCase().includes(q) || displayTitle.toLowerCase().includes(q);
       const matchesUrl = (entry.url || '').toLowerCase().includes(q) || (entry.video_id || '').toLowerCase().includes(q);
       const matchesDuration = (entry.duration_pref || '').toLowerCase().includes(q);
       const matchesSummary = (entry.summary || '').toLowerCase().includes(q);
@@ -1179,7 +1251,7 @@ Transcript:
 
       return matchesVideoTitle || matchesUrl || matchesDuration || matchesSummary || matchesClips || matchesQuotes;
     });
-  }, [history, historySearchQuery]);
+  }, [history, historySearchQuery, displayTitleMap]);
 
   // Smooth scroll active clip card into view in the sidebar list
   useEffect(() => {
@@ -1853,13 +1925,14 @@ Transcript:
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxHeight: '420px', overflowY: 'auto', paddingRight: '0.35rem' }}>
                   {filteredHistory.map((entry) => {
+                    const displayTitle = displayTitleMap.get(entry.cache_key) || entry.title;
                     const q = historySearchQuery.trim().toLowerCase();
                     const matchedClip = q ? entry.clip_titles?.find(t => t.toLowerCase().includes(q)) : null;
                     const matchedQuote = (!matchedClip && q) ? entry.key_quotes?.find(k => k.toLowerCase().includes(q)) : null;
 
                     return (
                       <div
-                        key={`${entry.video_id}_${entry.duration_pref}_${entry.range_suffix || ''}`}
+                        key={entry.cache_key}
                         className="history-entry-card"
                         onClick={() => loadFromHistory(entry)}
                       >
@@ -1896,7 +1969,7 @@ Transcript:
                             overflow: 'hidden',
                             textOverflow: 'ellipsis'
                           }}>
-                            {entry.title}
+                            {displayTitle}
                           </div>
                           <div style={{ display: 'flex', gap: '0.65rem', marginTop: '0.25rem', fontSize: '0.74rem', color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
                             <span style={{ color: 'var(--secondary)', fontWeight: 600 }}>{t.form.clipsCountMeta(entry.clip_count)}</span>
