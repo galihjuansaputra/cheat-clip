@@ -26,8 +26,8 @@ import json
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional, Callable
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from typing import List, Optional, Callable, Any, Dict, Union
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Header, Body, Request
 from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -40,11 +40,125 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import JSONFormatter
 from google import genai
 from google.genai import types
+
+# ----------------------------------------------------------------
+# Security & Privacy Redaction Engine for Logs & Traces
+# ----------------------------------------------------------------
+
+SENSITIVE_PATTERNS = [
+    # URL query parameter tokens: ?api_key=..., &key=..., etc.
+    (re.compile(r'([?&](?:api_key|apikey|gemini_key|key|token|access_token|secret|password|auth|authorization)=)[^&\s"\'`\)]+', re.IGNORECASE), r'\1[REDACTED]'),
+    # Google AI Studio / Gemini API key pattern (AIza...)
+    (re.compile(r'AIza[0-9A-Za-z\-_]{20,}'), '[REDACTED_API_KEY]'),
+    # JSON field values: "api_key": "...", etc.
+    (re.compile(r'("(?:api_key|apikey|gemini_key|key|token|access_token|secret|password|auth|authorization)"\s*:\s*)"[^"]*"', re.IGNORECASE), r'\1"[REDACTED]"'),
+    # Python/Code/String assignments: api_key='...', api_key="...", key=...
+    (re.compile(r'(\b(?:api_key|apikey|gemini_key|secret|password|access_token|authorization)\s*=\s*[\'"])[^\'"]+([\'"])', re.IGNORECASE), r'\1[REDACTED]\2'),
+    # Authorization header tokens: Bearer ..., Basic ..., key=...
+    (re.compile(r'(\b(?:Bearer|Basic|key=)\s+)[a-zA-Z0-9_\-\.]{8,}', re.IGNORECASE), r'\1[REDACTED]'),
+    # Proxy passwords in URLs: http://user:pass@host:port
+    (re.compile(r'((?:https?|socks4|socks5)://[^:\s/@]+:)[^@\s/]+(@)', re.IGNORECASE), r'\1***\2'),
+]
+
+def sanitize_sensitive_data(val: Any) -> Any:
+    """Recursively redacts API keys, credentials, and sensitive tokens from strings, containers, or objects."""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        res = val
+        for pattern, replacement in SENSITIVE_PATTERNS:
+            res = pattern.sub(replacement, res)
+        return res
+    elif isinstance(val, (list, tuple)):
+        sanitized = [sanitize_sensitive_data(item) for item in val]
+        return tuple(sanitized) if isinstance(val, tuple) else sanitized
+    elif isinstance(val, dict):
+        sanitized_dict = {}
+        for k, v in val.items():
+            k_lower = str(k).lower()
+            if any(s in k_lower for s in ('api_key', 'apikey', 'gemini_key', 'secret', 'password', 'token', 'authorization')):
+                sanitized_dict[k] = '[REDACTED]' if v else v
+            else:
+                sanitized_dict[k] = sanitize_sensitive_data(v)
+        return sanitized_dict
+    elif isinstance(val, Exception):
+        return sanitize_sensitive_data(str(val))
+    return val
+
+_original_log_record_factory = logging.getLogRecordFactory()
+
+def sensitive_log_record_factory(*args, **kwargs):
+    record = _original_log_record_factory(*args, **kwargs)
+    try:
+        if isinstance(record.msg, str):
+            record.msg = sanitize_sensitive_data(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = sanitize_sensitive_data(record.args)
+            elif isinstance(record.args, (tuple, list)):
+                record.args = tuple(sanitize_sensitive_data(arg) for arg in record.args)
+            else:
+                record.args = sanitize_sensitive_data(str(record.args))
+        if getattr(record, 'exc_text', None):
+            record.exc_text = sanitize_sensitive_data(record.exc_text)
+        if getattr(record, 'stack_info', None):
+            record.stack_info = sanitize_sensitive_data(record.stack_info)
+    except Exception:
+        pass
+    return record
+
+logging.setLogRecordFactory(sensitive_log_record_factory)
+
+class SensitiveDataFilter(logging.Filter):
+    """Logging filter that intercepts and sanitizes sensitive keys, tokens, and credentials in all log records."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = sanitize_sensitive_data(record.msg)
+            if record.args:
+                if isinstance(record.args, dict):
+                    record.args = sanitize_sensitive_data(record.args)
+                elif isinstance(record.args, (tuple, list)):
+                    record.args = tuple(sanitize_sensitive_data(arg) for arg in record.args)
+                else:
+                    record.args = sanitize_sensitive_data(str(record.args))
+            if record.exc_text:
+                record.exc_text = sanitize_sensitive_data(record.exc_text)
+            if record.stack_info:
+                record.stack_info = sanitize_sensitive_data(record.stack_info)
+        except Exception:
+            pass
+        return True
+
+def apply_security_logging_filters():
+    """Applies the sensitive data filter to all standard and uvicorn loggers and handlers."""
+    sensitive_filter = SensitiveDataFilter()
+    target_loggers = [
+        logging.getLogger(),
+        logging.getLogger("cheat-clip"),
+        logging.getLogger("uvicorn"),
+        logging.getLogger("uvicorn.access"),
+        logging.getLogger("uvicorn.error"),
+        logging.getLogger("uvicorn.asgi"),
+        logging.getLogger("fastapi"),
+    ]
+    for lgr in target_loggers:
+        if not any(isinstance(f, SensitiveDataFilter) for f in lgr.filters):
+            lgr.addFilter(sensitive_filter)
+        for handler in lgr.handlers:
+            if not any(isinstance(f, SensitiveDataFilter) for f in handler.filters):
+                handler.addFilter(sensitive_filter)
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
+apply_security_logging_filters()
 logger = logging.getLogger("cheat-clip")
 
 app = FastAPI(title="CHEAT CLIP API", description="AI-powered YouTube Viral Hotspot Finder")
+
+@app.on_event("startup")
+def on_startup_security():
+    apply_security_logging_filters()
 
 # Configure CORS
 app.add_middleware(
@@ -1322,8 +1436,15 @@ def get_flash_models_for_key(client: genai.Client) -> List[str]:
 
 
 @app.get("/api/models")
-def list_available_models(api_key: str = ""):
-    """Fetches list of available Gemini models using the user's API key, prioritizing Flash models (newest first)."""
+@app.post("/api/models")
+def list_available_models(
+    api_key: Optional[str] = Query(None),
+    x_gemini_api_key: Optional[str] = Header(None, alias="x-gemini-api-key"),
+    authorization: Optional[str] = Header(None),
+    payload: Optional[Dict[str, Any]] = Body(None)
+):
+    """Fetches list of available Gemini models using the user's API key, prioritizing Flash models (newest first).
+    Securely accepts API key via 'x-gemini-api-key' header, Authorization bearer header, POST body, or query param."""
     default_models = [
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',
@@ -1332,7 +1453,13 @@ def list_available_models(api_key: str = ""):
         'gemini-1.5-flash',
         'gemini-2.5-pro'
     ]
-    key_to_use = (api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
+    auth_key = ""
+    if authorization:
+        auth_key = authorization.replace("Bearer ", "").replace("bearer ", "").strip()
+    
+    body_key = payload.get("api_key") if (payload and isinstance(payload, dict)) else None
+    key_to_use = (x_gemini_api_key or auth_key or body_key or api_key or os.environ.get("GEMINI_API_KEY") or "").strip()
+    
     if not key_to_use or key_to_use.lower() == "mock":
         return {"models": default_models}
     try:
@@ -1382,16 +1509,21 @@ def list_available_models(api_key: str = ""):
             
         return {"models": final_list}
     except Exception as e:
-        logger.error(f"Error listing models: {e}")
+        logger.error(f"Error listing models: {sanitize_sensitive_data(str(e))}")
         return {"models": default_models}
 
 @app.post("/api/analyze")
-async def analyze_video(request: AnalyzeRequest):
+async def analyze_video(
+    request: AnalyzeRequest,
+    x_gemini_api_key: Optional[str] = Header(None, alias="x-gemini-api-key"),
+    authorization: Optional[str] = Header(None)
+):
     """Stream real-time progress via Server-Sent Events, then deliver the final result."""
 
     async def stream():
         try:
-            gemini_key = (request.api_key or os.environ.get("GEMINI_API_KEY") or '').strip()
+            auth_key = authorization.replace("Bearer ", "").replace("bearer ", "").strip() if authorization else ""
+            gemini_key = (x_gemini_api_key or auth_key or request.api_key or os.environ.get("GEMINI_API_KEY") or '').strip()
             is_mock = gemini_key.lower() == "mock"
 
             if not gemini_key:
@@ -2023,9 +2155,10 @@ async def analyze_video(request: AnalyzeRequest):
                             "status": 404
                         })
                     else:
-                        logger.error(f"Gemini error after all fallback models: {error_to_report}")
+                        clean_err = sanitize_sensitive_data(str(error_to_report))
+                        logger.error(f"Gemini error after all fallback models: {clean_err}")
                         yield _sse({
-                            "error": f"AI analysis failed across all available Flash models ({str(error_to_report)}). Please change your Gemini API key or try again in a few moments.",
+                            "error": f"AI analysis failed across all available Flash models ({clean_err}). Please change your Gemini API key or try again in a few moments.",
                             "status": 500
                         })
                 else:

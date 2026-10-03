@@ -239,7 +239,11 @@ export default function App() {
       }
       setLoadingModels(true);
       try {
-        const res = await fetch(`/api/models?api_key=${encodeURIComponent(cleanKey)}`);
+        const res = await fetch('/api/models', {
+          headers: {
+            'x-gemini-api-key': cleanKey
+          }
+        });
         if (res.ok) {
           const data = await res.json();
           if (data.models && data.models.length > 0) {
@@ -804,13 +808,17 @@ export default function App() {
     let resultData: AnalyzeResponse | null = null;
 
     try {
+      const cleanApiKey = apiKey.trim();
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(cleanApiKey ? { 'x-gemini-api-key': cleanApiKey } : {})
+        },
         body: JSON.stringify({
           url: url.trim(),
           duration: durationPref,
-          api_key: apiKey.trim() || undefined,
+          api_key: cleanApiKey || undefined,
           model: selectedModel,
           custom_prompt: customPrompt.trim() || undefined,
           range_start: rangeStartSecs,
