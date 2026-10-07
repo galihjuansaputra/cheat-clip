@@ -10,9 +10,6 @@ from backend.config import logger
 from backend.routers import (
     analyze_router,
     cookies_router,
-    downloads_router,
-    media_router,
-    render_router,
     system_router,
 )
 # Re-exports for backwards compatibility
@@ -25,29 +22,11 @@ from backend.schemas.analyze import (
     ViralClip,
     ViralClipGemini,
 )
-from backend.schemas.downloads import (
-    CookiesSaveRequest,
-    RawClipDownloadRequest,
-    RawVideoDownloadRequest,
-)
-from backend.schemas.render import (
-    RenderBatchRequest,
-    RenderSettingsModel,
-    RetryBatchRequest,
-)
-from backend.services.download_service import (
-    raw_clip_download_jobs,
-    raw_download_jobs,
-)
-from backend.services.render_service import (
-    BATCH_REQUESTS,
-    RENDER_BATCHES,
-)
 
 # Initialize FastAPI Application
 app = FastAPI(
-    title="CHEAT CLIP PRO API",
-    description="High-performance backend API for Cheat Clip Pro auto-clipper and video studio",
+    title="CHEAT CLIP API",
+    description="Lightweight backend API for Cheat Clip viral moment analysis",
     version="2.0.0"
 )
 
@@ -87,13 +66,10 @@ async def add_security_headers(request: Request, call_next):
 
 # Include Modular Routers
 app.include_router(analyze_router)
-app.include_router(render_router)
-app.include_router(media_router)
 app.include_router(cookies_router)
-app.include_router(downloads_router)
 app.include_router(system_router)
 
-logger.info("Cheat Clip PRO backend routers mounted successfully.")
+logger.info("Cheat Clip backend routers mounted successfully.")
 
 if __name__ == "__main__":
     import uvicorn

@@ -10,7 +10,6 @@ from backend.config import (
     get_effective_cookies_path,
     logger,
 )
-from backend.schemas.downloads import CookiesSaveRequest
 
 router = APIRouter(tags=["Cookies"])
 

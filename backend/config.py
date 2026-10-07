@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+from typing import Optional
 
 # Windows Python 3.14 compatibility hotfix for unix RTLD flags and uname used in yt-dlp plugins
 for flag in ('RTLD_LAZY', 'RTLD_NOW', 'RTLD_GLOBAL', 'RTLD_LOCAL', 'RTLD_NODELETE', 'RTLD_NOLOAD', 'RTLD_DEEPBIND'):
@@ -42,68 +43,35 @@ except Exception:
     pass
 
 # Automatically load environment variables from backend/.env or root .env
-_base_dir = os.path.dirname(os.path.abspath(__file__))
+_base_dir = Path(__file__).resolve().parent
 load_dotenv(os.path.join(_base_dir, ".env"))
-load_dotenv(os.path.join(_base_dir, "..", ".env"))
+load_dotenv(os.path.join(_base_dir.parent, ".env"))
 load_dotenv()
 
-ROOT_DIR = Path(_base_dir).parent
+ROOT_DIR = _base_dir.parent
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cheat-clip-pro")
 
+# Standard paths
+COOKIES_PATH = _base_dir / "cookies.txt"
+ROOT_COOKIES_PATH = ROOT_DIR / "cookies.txt"
+TEMP_DIR = _base_dir / "temp"
 
+# Safe temp directory creation (e.g. in /tmp for Vercel / serverless if read-only)
 try:
-    from backend.video_engine import (
-        TEMP_DIR,
-        EXPORTS_DIR,
-        FONTS_DIR,
-        COOKIES_PATH,
-        ROOT_COOKIES_PATH,
-        get_effective_cookies_path,
-        ACTIVE_ENCODER_NAME,
-        ACTIVE_ENCODER_ARGS,
-        detect_hardware_support,
-        is_valid_mp4,
-        download_clip_segment,
-        download_full_raw_video,
-        transcribe_clip_words,
-        has_emoji,
-        render_title_overlay_png,
-        generate_ass_file,
-        render_clip_to_mp4,
-        extract_clip_frame,
-        detect_speaker_face_box,
-        get_video_file_metadata,
-        compute_audio_energy_heatmap,
-        transcribe_local_video_file,
-    )
-except ImportError:
-    from video_engine import (
-        TEMP_DIR,
-        EXPORTS_DIR,
-        FONTS_DIR,
-        COOKIES_PATH,
-        ROOT_COOKIES_PATH,
-        get_effective_cookies_path,
-        ACTIVE_ENCODER_NAME,
-        ACTIVE_ENCODER_ARGS,
-        detect_hardware_support,
-        is_valid_mp4,
-        download_clip_segment,
-        download_full_raw_video,
-        transcribe_clip_words,
-        has_emoji,
-        render_title_overlay_png,
-        generate_ass_file,
-        render_clip_to_mp4,
-        extract_clip_frame,
-        detect_speaker_face_box,
-        get_video_file_metadata,
-        compute_audio_energy_heatmap,
-        transcribe_local_video_file,
-    )
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    import tempfile
+    TEMP_DIR = Path(tempfile.gettempdir()) / "cheat_clip_temp"
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-UPLOADS_DIR = TEMP_DIR / "uploads"
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_effective_cookies_path() -> Optional[Path]:
+    """Returns path to the active cookies.txt file if present."""
+    if COOKIES_PATH.exists() and COOKIES_PATH.stat().st_size > 0:
+        return COOKIES_PATH
+    if ROOT_COOKIES_PATH.exists() and ROOT_COOKIES_PATH.stat().st_size > 0:
+        return ROOT_COOKIES_PATH
+    return None

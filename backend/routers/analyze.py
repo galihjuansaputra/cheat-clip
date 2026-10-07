@@ -13,11 +13,7 @@ from pathlib import Path
 
 from backend.config import (
     TEMP_DIR,
-    UPLOADS_DIR,
-    compute_audio_energy_heatmap,
-    get_video_file_metadata,
     logger,
-    transcribe_local_video_file,
 )
 from backend.schemas.analyze import (
     AnalyzeRequest,
@@ -31,10 +27,6 @@ from backend.services.ai_service import (
     KNOWN_FLASH_MODELS,
     get_flash_models_for_key,
     list_available_gemini_models,
-)
-from backend.services.gdrive_service import (
-    download_google_drive_video,
-    is_google_drive_url,
 )
 from backend.services.youtube_service import (
     fetch_transcript,
@@ -110,95 +102,49 @@ async def analyze_video(request: AnalyzeRequest):
             return
 
         # ── Step 1: Detect Source Type & Extract Metadata ───────────────────
-        req_clean = request.url.strip()
-        is_uploaded = False
-        is_gdrive = is_google_drive_url(req_clean)
-        uploaded_file_path: Optional[Path] = None
-
-        if is_gdrive:
-            yield _sse({
-                "step": 1,
-                "step_progress": 10,
-                "overall_progress": 5,
-                "stage": "Connecting to Google Drive",
-                "detail": "Resolving Google Drive sharing link & preparing download...",
-                "message": "Connecting to Google Drive..."
-            })
-            loop = asyncio.get_running_loop()
-            gdrive_queue: asyncio.Queue = asyncio.Queue()
-
-            def gdrive_progress(stage: str, detail: str, step_pct: int = 30):
-                loop.call_soon_threadsafe(gdrive_queue.put_nowait, {
-                    "step": 1,
-                    "step_progress": step_pct,
-                    "overall_progress": min(22, 5 + int(step_pct * 0.17)),
-                    "stage": stage,
-                    "detail": detail,
-                    "message": detail
-                })
-
-            try:
-                task = asyncio.create_task(
-                    asyncio.to_thread(download_google_drive_video, req_clean, gdrive_progress)
-                )
-                while not task.done():
-                    try:
-                        evt = await asyncio.wait_for(gdrive_queue.get(), timeout=0.2)
-                        yield _sse(evt)
-                    except asyncio.TimeoutError:
-                        pass
-                while not gdrive_queue.empty():
-                    yield _sse(gdrive_queue.get_nowait())
-
-                uploaded_file_path = await task
-                is_uploaded = True
-            except Exception as e:
-                yield _sse({"error": f"Failed to fetch video from Google Drive: {str(e)}", "status": 400})
+        source_type = "youtube"
+        video_url = None
+        video_id = extract_video_id(request.url)
+        if not video_id:
+            if not is_mock:
+                yield _sse({"error": "Invalid YouTube URL. Please check and try again.", "status": 400})
                 return
-        elif req_clean.startswith("upload_") or req_clean.startswith("/api/video/") or req_clean.startswith("file://") or os.path.exists(req_clean):
-            is_uploaded = True
-        elif (UPLOADS_DIR / os.path.basename(req_clean.split("?")[0])).exists():
-            is_uploaded = True
-        else:
-            matches = list(UPLOADS_DIR.glob(f"*{req_clean}*"))
-            if matches:
-                is_uploaded = True
+            video_id = "dQw4w9WgXcQ"
 
-        if is_uploaded:
-            if uploaded_file_path is None:
-                if os.path.exists(req_clean):
-                    uploaded_file_path = Path(req_clean)
-                elif (UPLOADS_DIR / os.path.basename(req_clean.split("?")[0])).exists():
-                    uploaded_file_path = UPLOADS_DIR / os.path.basename(req_clean.split("?")[0])
-                elif (TEMP_DIR / os.path.basename(req_clean.split("?")[0])).exists():
-                    uploaded_file_path = TEMP_DIR / os.path.basename(req_clean.split("?")[0])
-                else:
-                    matches = list(UPLOADS_DIR.glob(f"*{req_clean}*"))
-                    if matches:
-                        uploaded_file_path = matches[0]
-                    else:
-                        yield _sse({"error": "Uploaded video file not found on disk. Please upload again.", "status": 404})
-                        return
+        canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
-            video_id = uploaded_file_path.stem
-            canonical_url = req_clean if is_gdrive else f"/api/video/{uploaded_file_path.name}"
-            video_url = f"/api/video/{uploaded_file_path.name}"
-            source_type = "gdrive" if is_gdrive else "upload"
+        yield _sse({
+            "step": 1,
+            "step_progress": 30,
+            "overall_progress": 8,
+            "stage": "Connecting to YouTube",
+            "detail": "Connecting to YouTube & fetching video metadata...",
+            "message": "Connecting to YouTube — fetching video title and duration..."
+        })
 
+        channel = ""
+        try:
+            metadata = await asyncio.to_thread(fetch_video_metadata, canonical_url, request.proxy)
+            title    = metadata["title"]
+            channel  = metadata.get("channel", "")
+            duration = metadata["duration"]
+            heatmap  = metadata.get("heatmap") or []
+            is_live  = metadata.get("is_live", False)
+            live_status = metadata.get("live_status", "not_live")
             yield _sse({
                 "step": 1,
-                "step_progress": 30,
-                "overall_progress": 8,
-                "stage": "Inspecting Video File",
-                "detail": f"Reading streams & container metadata from {uploaded_file_path.name}...",
-                "message": f"Inspecting video file: {uploaded_file_path.name}..."
+                "step_progress": 100,
+                "overall_progress": 25,
+                "stage": "Video Verified",
+                "detail": f"Loaded metadata for \"{title[:45]}\" ({int(duration)}s)",
+                "message": f"Connected — \"{title[:45]}\" ({int(duration)}s)"
             })
-
-            try:
-                metadata = await asyncio.to_thread(get_video_file_metadata, uploaded_file_path)
-                title = metadata.get("title") or (uploaded_file_path.stem.replace("gdrive_", "GDrive: ") if is_gdrive else uploaded_file_path.stem)
-                channel = "Google Drive" if is_gdrive else "Local Upload"
-                duration = metadata.get("duration", 0.0)
+        except Exception as e:
+            if is_mock:
+                title = "Mock YouTube Video"
+                channel = "Cheat Clip Pro"
+                duration = 212.0
+                heatmap = []
                 is_live = False
                 live_status = "not_live"
                 yield _sse({
@@ -206,341 +152,119 @@ async def analyze_video(request: AnalyzeRequest):
                     "step_progress": 100,
                     "overall_progress": 25,
                     "stage": "Video Verified",
-                    "detail": f"Loaded video \"{title[:45]}\" ({int(duration)}s, {metadata.get('width')}x{metadata.get('height')})",
-                    "message": f"Loaded video — \"{title[:45]}\" ({int(duration)}s)"
+                    "detail": "Loaded mock video metadata (212s)",
+                    "message": "Mock video metadata loaded"
                 })
-            except Exception as e:
-                yield _sse({"error": f"Failed to probe uploaded video metadata: {str(e)}", "status": 500})
+            else:
+                msg = e.detail if isinstance(e, HTTPException) else str(e)
+                yield _sse({"error": f"Failed to fetch video details: {msg}", "status": 500})
                 return
 
-            logger.info(f"Local video loaded: title='{title}', duration={duration}s, path={uploaded_file_path}")
+        logger.info(f"Metadata fetched: title='{title}', duration={duration}s, heatmap_pts={len(heatmap)}")
 
-            # ── Step 2: Heatmap via acoustic energy ──────────────────────────
+        # ── Step 2: Heatmap ──────────────────────────────────────────────────
+        yield _sse({
+            "step": 2,
+            "step_progress": 40,
+            "overall_progress": 35,
+            "stage": "Scraping Retention",
+            "detail": "Extracting viewer replay telemetry and retention curve...",
+            "message": "Scraping player viewer retention curve..."
+        })
+        if heatmap:
             yield _sse({
                 "step": 2,
-                "step_progress": 40,
-                "overall_progress": 35,
-                "stage": "Computing Acoustic Heatmap",
-                "detail": "Analyzing audio energy envelope & speech intensity peaks...",
-                "message": "Computing audio engagement curve..."
+                "step_progress": 100,
+                "overall_progress": 50,
+                "stage": "Retention Decoded",
+                "detail": f"Viewer retention heatmap loaded — {len(heatmap)} audience interest data points parsed.",
+                "message": f"Viewer retention heatmap loaded — {len(heatmap)} data points scraped."
+            })
+        else:
+            yield _sse({
+                "step": 2,
+                "step_progress": 100,
+                "overall_progress": 50,
+                "stage": "Dialogue Fallback",
+                "detail": "No heatmap curve available — relying on full transcript dialogue analysis.",
+                "message": "No heatmap available for this video — will rely on transcript content analysis."
+            })
+
+        # ── Step 3: Transcript ───────────────────────────────────────────────
+        if request.subtitles:
+            yield _sse({
+                "step": 3,
+                "step_progress": 30,
+                "overall_progress": 55,
+                "stage": "Parsing Subtitles",
+                "detail": "Parsing custom SRT/TXT subtitle timestamps...",
+                "message": "Parsing manual subtitles..."
             })
             try:
-                heatmap = await asyncio.to_thread(compute_audio_energy_heatmap, uploaded_file_path, duration)
+                transcript_lines = parse_manual_subtitles(request.subtitles, duration)
+                if not transcript_lines:
+                    raise Exception("Custom subtitles parsed into empty array.")
                 yield _sse({
-                    "step": 2,
+                    "step": 3,
                     "step_progress": 100,
-                    "overall_progress": 50,
-                    "stage": "Acoustic Peaks Decoded",
-                    "detail": f"Acoustic engagement heatmap parsed — {len(heatmap)} audience interest data points generated.",
-                    "message": f"Acoustic energy heatmap loaded ({len(heatmap)} points)."
+                    "overall_progress": 70,
+                    "stage": "Subtitles Ready",
+                    "detail": f"Custom subtitles parsed — {len(transcript_lines)} timestamped lines loaded.",
+                    "message": f"Custom subtitles parsed — {len(transcript_lines)} lines loaded successfully."
                 })
             except Exception as e:
-                logger.warning(f"Heatmap calculation error: {e}")
-                heatmap = []
-                yield _sse({
-                    "step": 2,
-                    "step_progress": 100,
-                    "overall_progress": 50,
-                    "stage": "Dialogue Fallback",
-                    "detail": "Proceeding with full dialogue transcript analysis.",
-                    "message": "Proceeding with speech transcription..."
-                })
-
-            # ── Step 3: Speech Recognition via Whisper AI ───────────────────
-            if request.subtitles:
-                yield _sse({
-                    "step": 3,
-                    "step_progress": 30,
-                    "overall_progress": 55,
-                    "stage": "Parsing Subtitles",
-                    "detail": "Parsing custom SRT/TXT subtitle timestamps...",
-                    "message": "Parsing manual subtitles..."
-                })
-                try:
-                    transcript_lines = parse_manual_subtitles(request.subtitles, duration)
-                    if not transcript_lines:
-                        raise Exception("Custom subtitles parsed into empty array.")
-                    yield _sse({
-                        "step": 3,
-                        "step_progress": 100,
-                        "overall_progress": 70,
-                        "stage": "Subtitles Ready",
-                        "detail": f"Custom subtitles parsed — {len(transcript_lines)} timestamped lines loaded.",
-                        "message": f"Custom subtitles parsed — {len(transcript_lines)} lines loaded successfully."
-                    })
-                except Exception as e:
-                    yield _sse({"error": f"Failed to parse manual subtitles: {str(e)}", "status": 400})
-                    return
-            else:
-                loop = asyncio.get_running_loop()
-                progress_queue = asyncio.Queue()
-
-                def whisper_progress(stage: str, detail: str, step_pct: int = 30):
-                    loop.call_soon_threadsafe(progress_queue.put_nowait, {
-                        "step": 3,
-                        "step_progress": step_pct,
-                        "overall_progress": min(68, 50 + int(step_pct * 0.2)),
-                        "stage": stage,
-                        "detail": detail,
-                        "message": detail
-                    })
-
-                yield _sse({
-                    "step": 3,
-                    "step_progress": 25,
-                    "overall_progress": 55,
-                    "stage": "Transcribing with Whisper",
-                    "detail": "Running OpenAI Whisper neural speech model on video audio track...",
-                    "message": "Transcribing video dialogue with Whisper AI..."
-                })
-
-                try:
-                    task = asyncio.create_task(
-                        asyncio.to_thread(transcribe_local_video_file, uploaded_file_path, whisper_progress)
-                    )
-                    while not task.done():
-                        try:
-                            evt = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
-                            yield _sse(evt)
-                        except asyncio.TimeoutError:
-                            pass
-
-                    while not progress_queue.empty():
-                        yield _sse(progress_queue.get_nowait())
-
-                    transcript_lines = await task
-                    if not transcript_lines:
-                        if is_mock:
-                            transcript_lines = [
-                                {"text": "Hello and welcome to this video.",            "start":  0.0, "duration": 3.0},
-                                {"text": "Today we are looking at how this app works.",  "start":  3.0, "duration": 4.0},
-                                {"text": "It finds viral hotspots and highlights them.",  "start":  7.0, "duration": 4.0},
-                                {"text": "This works locally on any uploaded file.",     "start": 11.0, "duration": 3.0},
-                            ]
-                        else:
-                            yield _sse({
-                                "error": "No spoken words were detected in this video file. Ensure the video contains clear audible speech.",
-                                "status": 400
-                            })
-                            return
-
-                    yield _sse({
-                        "step": 3,
-                        "step_progress": 100,
-                        "overall_progress": 70,
-                        "stage": "Dialogue Transcribed",
-                        "detail": f"Whisper speech-to-text complete — {len(transcript_lines)} timestamped dialogue sentences ready.",
-                        "message": f"Whisper transcribed {len(transcript_lines)} dialogue segments successfully."
-                    })
-                except Exception as e:
-                    if is_mock:
-                        transcript_lines = [
-                            {"text": "Sample speech from uploaded mock video.", "start": 0.0, "duration": 4.0},
-                            {"text": "Highlighting viral moments automatically.", "start": 4.0, "duration": 5.0}
-                        ]
-                    else:
-                        yield _sse({"error": f"Whisper transcription failed: {str(e)}", "status": 500})
-                        return
-
+                yield _sse({"error": f"Failed to parse manual subtitles: {str(e)}", "status": 400})
+                return
         else:
-            # ── YouTube extraction path ──────────────────────────────────────
-            source_type = "youtube"
-            video_url = None
-            video_id = extract_video_id(request.url)
-            if not video_id:
-                if not is_mock:
-                    yield _sse({"error": "Invalid YouTube URL or file reference. Please check and try again.", "status": 400})
-                    return
-                video_id = "dQw4w9WgXcQ"
-
-            canonical_url = f"https://www.youtube.com/watch?v={video_id}"
-
             yield _sse({
-                "step": 1,
+                "step": 3,
                 "step_progress": 30,
-                "overall_progress": 8,
-                "stage": "Connecting to YouTube",
-                "detail": "Connecting to YouTube & fetching video metadata...",
-                "message": "Connecting to YouTube — fetching video title and duration..."
+                "overall_progress": 55,
+                "stage": "Fetching Transcript",
+                "detail": "Extracting YouTube subtitles & timestamps...",
+                "message": "Fetching YouTube transcript..."
             })
-
-            channel = ""
             try:
-                metadata = await asyncio.to_thread(fetch_video_metadata, canonical_url, request.proxy)
-                title    = metadata["title"]
-                channel  = metadata.get("channel", "")
-                duration = metadata["duration"]
-                heatmap  = metadata.get("heatmap") or []
-                is_live  = metadata.get("is_live", False)
-                live_status = metadata.get("live_status", "not_live")
+                transcript_lines = await asyncio.to_thread(fetch_transcript, video_id, request.proxy)
                 yield _sse({
-                    "step": 1,
+                    "step": 3,
                     "step_progress": 100,
-                    "overall_progress": 25,
-                    "stage": "Video Verified",
-                    "detail": f"Loaded metadata for \"{title[:45]}\" ({int(duration)}s)",
-                    "message": f"Connected — \"{title[:45]}\" ({int(duration)}s)"
+                    "overall_progress": 70,
+                    "stage": "Transcript Ready",
+                    "detail": f"YouTube transcript loaded — {len(transcript_lines)} dialogue segments parsed.",
+                    "message": f"Transcript loaded — {len(transcript_lines)} lines."
                 })
             except Exception as e:
                 if is_mock:
-                    title = "Mock YouTube Video"
-                    channel = "Cheat Clip Pro"
-                    duration = 212.0
-                    heatmap = []
-                    is_live = False
-                    live_status = "not_live"
+                    transcript_lines = [
+                        {"text": "Hello and welcome to this video.",            "start":  0.0, "duration": 3.0},
+                        {"text": "Today we are looking at how this app works.",  "start":  3.0, "duration": 4.0},
+                        {"text": "It finds viral hotspots and highlights them.",  "start":  7.0, "duration": 4.0},
+                        {"text": "You can paste any YouTube URL to try it.",     "start": 11.0, "duration": 3.0},
+                        {"text": "Thanks for watching and see you next time.",   "start": 14.0, "duration": 3.0},
+                    ]
                     yield _sse({
-                        "step": 1,
+                        "step": 3,
                         "step_progress": 100,
-                        "overall_progress": 25,
-                        "stage": "Video Verified",
-                        "detail": "Loaded mock video metadata (212s)",
-                        "message": "Mock video metadata loaded"
+                        "overall_progress": 70,
+                        "stage": "Transcript Ready",
+                        "detail": f"Mock transcript generated — {len(transcript_lines)} dialogue segments.",
+                        "message": "Mock transcript loaded."
                     })
                 else:
-                    msg = e.detail if isinstance(e, HTTPException) else str(e)
-                    yield _sse({"error": f"Failed to fetch video details: {msg}", "status": 500})
-                    return
-
-            logger.info(f"Metadata fetched: title='{title}', duration={duration}s, heatmap_pts={len(heatmap)}")
-
-            # ── Step 2: Heatmap ──────────────────────────────────────────────────
-            yield _sse({
-                "step": 2,
-                "step_progress": 40,
-                "overall_progress": 35,
-                "stage": "Scraping Retention",
-                "detail": "Extracting viewer replay telemetry and retention curve...",
-                "message": "Scraping player viewer retention curve..."
-            })
-            if heatmap:
-                yield _sse({
-                    "step": 2,
-                    "step_progress": 100,
-                    "overall_progress": 50,
-                    "stage": "Retention Decoded",
-                    "detail": f"Viewer retention heatmap loaded — {len(heatmap)} audience interest data points parsed.",
-                    "message": f"Viewer retention heatmap loaded — {len(heatmap)} data points scraped."
-                })
-            else:
-                yield _sse({
-                    "step": 2,
-                    "step_progress": 100,
-                    "overall_progress": 50,
-                    "stage": "Dialogue Fallback",
-                    "detail": "No heatmap curve available — relying on full transcript dialogue analysis.",
-                    "message": "No heatmap available for this video — will rely on transcript content analysis."
-                })
-
-            # ── Step 3: Transcript ───────────────────────────────────────────────
-            if request.subtitles:
-                yield _sse({
-                    "step": 3,
-                    "step_progress": 30,
-                    "overall_progress": 55,
-                    "stage": "Parsing Subtitles",
-                    "detail": "Parsing custom SRT/TXT subtitle timestamps...",
-                    "message": "Parsing manual subtitles..."
-                })
-                try:
-                    transcript_lines = parse_manual_subtitles(request.subtitles, duration)
-                    if not transcript_lines:
-                        raise Exception("Custom subtitles parsed into empty array.")
-                    yield _sse({
-                        "step": 3,
-                        "step_progress": 100,
-                        "overall_progress": 70,
-                        "stage": "Subtitles Ready",
-                        "detail": f"Custom subtitles parsed — {len(transcript_lines)} timestamped lines loaded.",
-                        "message": f"Custom subtitles parsed — {len(transcript_lines)} lines loaded successfully."
-                    })
-                except Exception as e:
-                    yield _sse({"error": f"Failed to parse manual subtitles: {str(e)}", "status": 400})
-                    return
-            else:
-                loop = asyncio.get_running_loop()
-                progress_queue = asyncio.Queue()
-
-                def progress_callback(stage: str, detail: str, step_pct: int = 30):
-                    loop.call_soon_threadsafe(progress_queue.put_nowait, {
-                        "step": 3,
-                        "step_progress": step_pct,
-                        "overall_progress": min(68, 50 + int(step_pct * 0.2)),
-                        "stage": stage,
-                        "detail": detail,
-                        "message": detail
-                    })
-
-                # Initial stage event
-                yield _sse({
-                    "step": 3,
-                    "step_progress": 25,
-                    "overall_progress": 55,
-                    "stage": "Fetching Subtitles",
-                    "detail": "Initializing multi-tier subtitle extraction pipeline...",
-                    "message": "Initializing multi-tier subtitle extraction pipeline..."
-                })
-
-                try:
-                    task = asyncio.create_task(
-                        asyncio.to_thread(fetch_transcript, video_id, request.proxy, progress_callback)
-                    )
-
-                    while not task.done():
-                        try:
-                            evt = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
-                            yield _sse(evt)
-                        except asyncio.TimeoutError:
-                            pass
-
-                    while not progress_queue.empty():
-                        yield _sse(progress_queue.get_nowait())
-
-                    transcript_lines = await task
-                    yield _sse({
-                        "step": 3,
-                        "step_progress": 100,
-                        "overall_progress": 70,
-                        "stage": "Subtitles Ready",
-                        "detail": f"Subtitles loaded — {len(transcript_lines)} dialogue sentences with timestamps ready.",
-                        "message": f"Subtitles loaded — {len(transcript_lines)} lines parsed successfully."
-                    })
-                except Exception as e:
-                    if is_mock:
-                        transcript_lines = [
-                            {"text": "Hello and welcome to this video.",            "start":  0.0, "duration": 3.0},
-                            {"text": "Today we are looking at how this app works.",  "start":  3.0, "duration": 4.0},
-                            {"text": "It finds viral hotspots and highlights them.",  "start":  7.0, "duration": 4.0},
-                            {"text": "Most people think it's magic.",               "start": 11.0, "duration": 3.0},
-                            {"text": "But it uses YouTube player heatmaps.",         "start": 14.0, "duration": 4.0},
-                            {"text": "And processes them with Gemini AI models.",    "start": 18.0, "duration": 4.0},
-                            {"text": "This is changing how editors crop videos.",    "start": 22.0, "duration": 5.0},
-                            {"text": "If you want to grow on TikTok, try it.",      "start": 27.0, "duration": 5.0},
-                            {"text": "We will explore the code next.",               "start": 32.0, "duration": 3.0},
-                        ]
+                    if is_live or live_status in ("is_live", "is_upcoming", "was_live", "post_live"):
                         yield _sse({
-                            "step": 3,
-                            "step_progress": 100,
-                            "overall_progress": 70,
-                            "stage": "Subtitles Ready",
-                            "detail": "Mock mode — 9 sample dialogue lines loaded.",
-                            "message": "Mock mode — using sample transcript."
+                            "error": (
+                                "This video appears to be a YouTube Live stream. Automatic captions/transcripts will become "
+                                "available once the live stream ends and YouTube finishes processing the video. "
+                                "You can upload custom subtitles manually to analyze this video."
+                            ),
+                            "status": 400
                         })
                     else:
-                        if is_live or live_status in ('is_live', 'is_upcoming', 'post_live'):
-                            yield _sse({
-                                "error": (
-                                    "No subtitles could be retrieved because this video is currently live, "
-                                    "upcoming, or recently completed (post-live processing). Subtitles are only "
-                                    "available once the live stream ends and YouTube finishes processing the video. "
-                                    "You can upload custom subtitles manually to analyze this video."
-                                ),
-                                "status": 400
-                            })
-                        else:
-                            msg = e.detail if isinstance(e, HTTPException) else str(e)
-                            yield _sse({"error": msg, "status": 400})
-                        return
+                        msg = e.detail if isinstance(e, HTTPException) else str(e)
+                        yield _sse({"error": msg, "status": 400})
+                    return
 
         # Estimate duration from transcript if missing
         if duration == 0.0 and transcript_lines:
