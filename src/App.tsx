@@ -2255,116 +2255,166 @@ Transcript:
       )}
 
       {/* Error state */}
-      {error && (
-        <section className="glass-panel" style={{ borderColor: 'rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '1.5rem', color: '#ef4444', lineHeight: 1, marginTop: '2px' }}>⚠️</span>
-            <div style={{ flex: 1 }}>
-              <h4 style={{ color: '#ef4444', margin: 0, fontSize: '1rem', fontWeight: 700 }}>{t.errors.analysisFailed}</h4>
-              <div style={{ fontSize: '0.875rem', color: '#fca5a5', marginTop: '0.5rem', lineHeight: '1.6', whiteSpace: 'pre-line', wordBreak: 'break-word', fontFamily: 'monospace, sans-serif', background: 'rgba(0, 0, 0, 0.25)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                {error}
+      {/* Error state */}
+      {error && (() => {
+        const isSupadataQuotaExhausted =
+          error.toLowerCase().includes("kuota transkrip") ||
+          error.toLowerCase().includes("2000/2000") ||
+          (error.toLowerCase().includes("supadata") && (
+            error.toLowerCase().includes("exhausted") ||
+            error.toLowerCase().includes("quota") ||
+            error.toLowerCase().includes("429") ||
+            error.toLowerCase().includes("402")
+          )) ||
+          error.toLowerCase().includes("downsub.com");
+
+        const isSubtitleError = isSupadataQuotaExhausted || error.toLowerCase().includes("subtitle") || error.toLowerCase().includes("transcript");
+
+        let displayErrorText = error;
+        if (isSupadataQuotaExhausted) {
+          if (error.includes("Tier 1") || error.includes("Methods attempted")) {
+            displayErrorText = t.errors.quotaExhaustedMsg(supadataUsage?.total_used, supadataUsage?.total_limit);
+          }
+        }
+
+        const downsubUrl = url.trim() ? `https://downsub.com/?url=${encodeURIComponent(url.trim())}` : 'https://downsub.com/';
+
+        return (
+          <section className="glass-panel" style={{ borderColor: 'rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: '1.5rem', color: '#ef4444', lineHeight: 1, marginTop: '2px' }}>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <h4 style={{ color: '#ef4444', margin: 0, fontSize: '1rem', fontWeight: 700 }}>
+                  {isSupadataQuotaExhausted ? t.errors.quotaExhaustedTitle : t.errors.analysisFailed}
+                </h4>
+                <div style={{ fontSize: '0.875rem', color: '#fca5a5', marginTop: '0.5rem', lineHeight: '1.6', whiteSpace: 'pre-line', wordBreak: 'break-word', fontFamily: isSupadataQuotaExhausted ? 'inherit' : 'monospace, sans-serif', background: 'rgba(0, 0, 0, 0.25)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                  {displayErrorText}
+                </div>
+
+                {/* Subtitle failure actions */}
+                {isSubtitleError ? (
+                  <>
+                    <div style={{ marginTop: '0.85rem', display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="glowing-btn"
+                        onClick={() => {
+                          setSubtitlesSource('manual');
+                          const fileInput = document.getElementById('manual-subtitle-file');
+                          if (fileInput) fileInput.click();
+                        }}
+                        style={{
+                          padding: '0.45rem 1.15rem',
+                          fontSize: '0.85rem',
+                          borderRadius: '8px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📄 {t.form.uploadCustomSubtitles}
+                      </button>
+                      <a
+                        href={downsubUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.08)',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          color: 'var(--text-primary)',
+                          borderRadius: '8px',
+                          padding: '0.45rem 0.85rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          textDecoration: 'none',
+                          transition: 'var(--transition-smooth)'
+                        }}
+                      >
+                        🌐 {t.errors.downloadDownsubPrompt}
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleAnalyze()}
+                        disabled={loading}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          color: 'var(--text-secondary)',
+                          borderRadius: '8px',
+                          padding: '0.45rem 0.85rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem'
+                        }}
+                      >
+                        <span className={loading ? "spinning-icon" : ""}>🔄</span>
+                        {t.errors.tryAgain}
+                      </button>
+                    </div>
+                    <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.85rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', borderLeft: '3px solid #f59e0b', fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                      💡 <strong>Tip:</strong> {t.errors.noSubtitlesTip}
+                    </div>
+                  </>
+                ) : (
+                  /* Gemini API Key / AI Studio quota actions (Only if NOT a subtitle error) */
+                  (error.toLowerCase().includes("api key") || error.toLowerCase().includes("quota") || error.toLowerCase().includes("flash model") || error.toLowerCase().includes("aistudio") || error.toLowerCase().includes("rate limit")) && (
+                    <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const keyInput = document.getElementById('gemini-key-input') as HTMLInputElement | null;
+                          if (keyInput) {
+                            keyInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            keyInput.focus();
+                            keyInput.select();
+                          }
+                        }}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          color: '#fca5a5',
+                          borderRadius: '8px',
+                          padding: '0.4rem 0.85rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        🔑 {t.errors.changeApiKeyAction}
+                      </button>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          color: 'var(--primary)',
+                          fontSize: '0.8rem',
+                          textDecoration: 'underline',
+                          fontWeight: 500
+                        }}
+                      >
+                        {t.errors.getNewKeyLink}
+                      </a>
+                    </div>
+                  )
+                )}
               </div>
-              {/* Subtitle failure actions */}
-              {(error.toLowerCase().includes("subtitle") || error.toLowerCase().includes("transcript")) ? (
-                <>
-                  <div style={{ marginTop: '0.85rem', display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'center' }}>
-                    <button
-                      type="button"
-                      className="glowing-btn"
-                      onClick={() => handleAnalyze()}
-                      disabled={loading}
-                      style={{
-                        padding: '0.45rem 1.15rem',
-                        fontSize: '0.85rem',
-                        borderRadius: '8px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.45rem',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <span className={loading ? "spinning-icon" : ""}>🔄</span>
-                      {t.errors.tryAgain}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSubtitlesSource('manual');
-                        const fileInput = document.getElementById('manual-subtitle-file');
-                        if (fileInput) fileInput.click();
-                      }}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.15)',
-                        color: 'var(--text-primary)',
-                        borderRadius: '8px',
-                        padding: '0.45rem 0.85rem',
-                        fontSize: '0.8rem',
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem'
-                      }}
-                    >
-                      📄 {t.form.uploadCustomSubtitles}
-                    </button>
-                  </div>
-                  <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.85rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', borderLeft: '3px solid #f59e0b', fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-                    💡 <strong>Tip:</strong> {t.errors.noSubtitlesTip}
-                  </div>
-                </>
-              ) : (
-                /* Gemini API Key / AI Studio quota actions (Only if NOT a subtitle error) */
-                (error.toLowerCase().includes("api key") || error.toLowerCase().includes("quota") || error.toLowerCase().includes("flash model") || error.toLowerCase().includes("aistudio") || error.toLowerCase().includes("rate limit")) && (
-                  <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const keyInput = document.getElementById('gemini-key-input') as HTMLInputElement | null;
-                        if (keyInput) {
-                          keyInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          keyInput.focus();
-                          keyInput.select();
-                        }
-                      }}
-                      style={{
-                        background: 'rgba(239, 68, 68, 0.15)',
-                        border: '1px solid rgba(239, 68, 68, 0.4)',
-                        color: '#fca5a5',
-                        borderRadius: '8px',
-                        padding: '0.4rem 0.85rem',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      🔑 {t.errors.changeApiKeyAction}
-                    </button>
-                    <a
-                      href="https://aistudio.google.com/app/apikey"
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        color: 'var(--primary)',
-                        fontSize: '0.8rem',
-                        textDecoration: 'underline',
-                        fontWeight: 500
-                      }}
-                    >
-                      {t.errors.getNewKeyLink}
-                    </a>
-                  </div>
-                )
-              )}
             </div>
-          </div>
-        </section>
-      )}
+          </section>
+        );
+      })()}
 
       {/* Loading Steps state with Real Progress Bars & Cognitive AI Diagnostics */}
       {loading && (

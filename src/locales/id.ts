@@ -108,6 +108,10 @@ export const id: Translations = {
     startLessThanEnd: "Waktu mulai harus lebih kecil dari waktu selesai.",
     chooseSubtitleFile: "Silakan pilih atau seret berkas subtitle (.srt atau .txt).",
     analysisFailed: "Analisis Gagal",
+    quotaExhaustedTitle: "Batas Kuota Transkrip Otomatis Telah Habis",
+    quotaExhaustedMsg: (used?: number, limit?: number) =>
+      `Batas kuota transkrip otomatis telah habis (${used !== undefined && limit ? `${used}/${limit} kuota` : '2000/2000'} sudah terpakai bulan ini). Semua metode fallback pengambilan subtitle juga tidak berhasil. Silakan gunakan opsi Unggah Subtitle Manual dengan mengunduh subtitle (.srt/.txt) melalui DownSub.com.`,
+    downloadDownsubPrompt: "Unduh Subtitle via DownSub.com ↗",
     changeApiKeyAction: "Ganti API Key",
     getNewKeyLink: "Dapatkan key gratis di Google AI Studio ↗",
     noSubtitlesMsg: "Tidak dapat mengambil subtitle untuk video ini. Subtitle mungkin dinonaktifkan, atau video dibatasi usia/bersifat privat.",

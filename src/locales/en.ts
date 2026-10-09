@@ -106,6 +106,10 @@ export const en = {
     startLessThanEnd: "Start time must be less than end time.",
     chooseSubtitleFile: "Please choose or drag-and-drop a custom subtitle file (.srt or .txt).",
     analysisFailed: "Analysis Failed",
+    quotaExhaustedTitle: "Auto-Transcript Quota Limit Reached",
+    quotaExhaustedMsg: (used?: number, limit?: number) =>
+      `Auto-transcript quota limit reached (${used !== undefined && limit ? `${used}/${limit} requests` : '2000/2000'} used this month across API keys). All fallback methods also failed to fetch automatic captions. Please use the Manual Subtitle option by uploading a .srt or .txt file from DownSub.com.`,
+    downloadDownsubPrompt: "Download Subtitles via DownSub.com ↗",
     changeApiKeyAction: "Change API Key",
     getNewKeyLink: "Get free key at Google AI Studio ↗",
     noSubtitlesMsg: "No subtitles could be retrieved for this video. Subtitles might be disabled, or the video may be age-restricted or private.",

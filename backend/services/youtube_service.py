@@ -688,7 +688,38 @@ def fetch_transcript(
     except Exception as ytdlp_err:
         attempt_history.append(f"Tier 7 (Direct yt-dlp): {type(ytdlp_err).__name__} ({str(ytdlp_err)[:150]})")
 
-    # ── All Tiers Exhausted: Construct Comprehensive Diagnostic Error ─────────
+    # ── All Tiers Exhausted: Construct Error ──────────────────────────────────
+    all_supadata_keys_exhausted = bool(keys) and (
+        any("configured API keys exhausted" in h or "Monthly Quota Exceeded" in h for h in attempt_history)
+    )
+    if not all_supadata_keys_exhausted and keys:
+        try:
+            usage = get_supadata_usage_data()
+            if usage and usage.get("total_remaining", 1) == 0 and usage.get("total_limit", 0) > 0:
+                all_supadata_keys_exhausted = True
+        except Exception:
+            pass
+
+    if all_supadata_keys_exhausted:
+        total_keys = len(keys)
+        total_quota = total_keys * 100
+        total_used = total_quota
+        try:
+            usage = get_supadata_usage_data()
+            if usage and usage.get("total_limit"):
+                total_quota = usage.get("total_limit", total_quota)
+                total_used = usage.get("total_used", total_quota)
+        except Exception:
+            pass
+
+        simplified_error = (
+            f"Batas kuota transkrip otomatis telah habis ({total_used}/{total_quota} kuota terpakai bulan ini dari {total_keys} API key). "
+            f"Seluruh metode fallback (Tier 1-7) juga tidak dapat mengambil subtitle otomatis dari YouTube. "
+            f"Silakan gunakan opsi 'Unggah Subtitle Manual' dengan mengunduh berkas subtitle (.srt/.txt) secara gratis melalui DownSub.com."
+        )
+        logger.warning(f"Subtitle retrieval exhausted all methods with Supadata quota depleted:\n{simplified_error}")
+        raise HTTPException(status_code=400, detail=simplified_error)
+
     combined_history = " ".join(attempt_history)
     root_cause = []
     if "TranscriptsDisabled" in combined_history:
