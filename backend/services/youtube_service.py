@@ -593,7 +593,7 @@ def fetch_transcript(
                     except Exception:
                         continue
 
-                attempt_history.append(f"Tier 2 (Proxy Python API): No accessible track in {len(transcripts)} tracks")
+                attempt_history.append(f"Tier 2 (Proxy Python API): No accessible track in {len(all_transcripts)} tracks")
             except Exception as list_err:
                 err_type = type(list_err).__name__
                 err_msg = str(list_err).strip().split('\n')[0]
