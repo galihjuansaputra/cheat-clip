@@ -39,6 +39,10 @@ export const en = {
     // Subtitles source
     subtitlesSource: "Subtitles Source",
     autoFetchYoutube: "Auto-fetch from YouTube",
+    autoTranscriptLanguage: "Auto Transcript Language",
+    langIndonesian: "🇮🇩 Indonesian (ID)",
+    langEnglish: "🇺🇸 English (EN)",
+    autoTranscriptLangDesc: "Choose preferred YouTube transcript language to keep clips and transcript aligned without language mismatch.",
     uploadCustomSubtitles: "Upload Custom Subtitles (.srt, .txt)",
     chooseSrtTxt: "📂 Choose SRT/TXT File",
     subtitlesLoaded: (name: string) => `Loaded: ${name}`,

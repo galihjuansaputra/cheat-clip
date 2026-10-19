@@ -47,6 +47,17 @@ export default function App() {
   const [manualSubtitlesContent, setManualSubtitlesContent] = useState<string>('');
   const [manualSubtitlesFileName, setManualSubtitlesFileName] = useState<string>('');
 
+  // Auto transcript language preference (Indonesian 'id' or English 'en')
+  const [autoTranscriptLang, setAutoTranscriptLang] = useState<'id' | 'en'>(() => {
+    const saved = localStorage.getItem('cheat_clip_auto_transcript_lang');
+    return saved === 'id' || saved === 'en' ? saved : 'id';
+  });
+
+  const handleAutoTranscriptLangChange = (lang: 'id' | 'en') => {
+    setAutoTranscriptLang(lang);
+    localStorage.setItem('cheat_clip_auto_transcript_lang', lang);
+  };
+
   // Supadata quota tracking
   const [supadataUsage, setSupadataUsage] = useState<SupadataUsage | null>(null);
   const [loadingSupadataUsage, setLoadingSupadataUsage] = useState<boolean>(false);
@@ -733,10 +744,11 @@ export default function App() {
       ? `_range_${rangeStartSecs ?? 0}_${rangeEndSecs ?? 'end'}`
       : '';
     const manualSuffix = subtitlesSource === 'manual' ? '_manual' : '';
+    const langSuffix = subtitlesSource === 'youtube' ? `_lang_${autoTranscriptLang}` : '';
     const promptSuffix = customPrompt.trim() ? `_prompt_${customPrompt.trim().replace(/[^a-zA-Z0-9]/g, '_')}` : '';
     const modelSuffix = `_model_${selectedModel}`;
     const clipsSuffix = `_clips_${targetClipCount}`;
-    const cacheKey = videoId ? `cheat_clip_cache_${videoId}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}` : null;
+    const cacheKey = videoId ? `cheat_clip_cache_${videoId}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}${langSuffix}` : null;
 
     if (cacheKey) {
       const cachedData = localStorage.getItem(cacheKey);
@@ -826,6 +838,7 @@ export default function App() {
           subtitles: subtitlesSource === 'manual' ? manualSubtitlesContent : undefined,
           subtitles_filename: subtitlesSource === 'manual' ? manualSubtitlesFileName : undefined,
           target_clip_count: targetClipCount,
+          transcript_lang: subtitlesSource === 'youtube' ? autoTranscriptLang : undefined,
         }),
       });
 
@@ -929,8 +942,9 @@ export default function App() {
           const promptSuffix = customPrompt.trim() ? `_prompt_${customPrompt.trim().replace(/[^a-zA-Z0-9]/g, '_')}` : '';
           const modelSuffix = `_model_${selectedModel}`;
           const clipsSuffix = `_clips_${targetClipCount}`;
-          const targetCacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}`;
-          const tsKey = `cheat_clip_ts_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}`;
+          const langSuffix = subtitlesSource === 'youtube' ? `_lang_${autoTranscriptLang}` : '';
+          const targetCacheKey = `cheat_clip_cache_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}${langSuffix}`;
+          const tsKey = `cheat_clip_ts_${resultData.video_id}_${durationPref}${modelSuffix}${clipsSuffix}${promptSuffix}${rangeSuffix}${manualSuffix}${langSuffix}`;
           localStorage.setItem(targetCacheKey, JSON.stringify(resultData));
           localStorage.setItem(tsKey, new Date().toISOString());
           refreshHistory();
@@ -1770,14 +1784,63 @@ Transcript:
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.45rem',
-                  padding: '0.65rem 0.85rem',
+                  gap: '0.75rem',
+                  padding: '0.85rem 1rem',
                   background: 'rgba(255, 255, 255, 0.03)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '8px',
+                  borderRadius: '10px',
                   marginTop: '0.25rem'
                 }}
               >
+                {/* Auto Transcript Language Selector */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ fontSize: '1rem' }}>🌐</span> {t.form.autoTranscriptLanguage}
+                    </label>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {autoTranscriptLang === 'id' ? 'Bahasa Indonesia' : 'English'}
+                    </span>
+                  </div>
+
+                  <div className="duration-selector" style={{ maxWidth: '340px' }}>
+                    <button
+                      type="button"
+                      className={`duration-btn ${autoTranscriptLang === 'id' ? 'active' : ''}`}
+                      onClick={() => handleAutoTranscriptLangChange('id')}
+                      disabled={loading}
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        fontSize: '0.84rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      {t.form.langIndonesian}
+                    </button>
+                    <button
+                      type="button"
+                      className={`duration-btn ${autoTranscriptLang === 'en' ? 'active' : ''}`}
+                      onClick={() => handleAutoTranscriptLangChange('en')}
+                      disabled={loading}
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        fontSize: '0.84rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      {t.form.langEnglish}
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: '1.3' }}>
+                    💡 {t.form.autoTranscriptLangDesc}
+                  </span>
+                </div>
                 {/* Small text showing usage limit */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem', fontSize: '0.78rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)' }}>

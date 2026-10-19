@@ -41,6 +41,10 @@ export const id: Translations = {
     // Subtitles source
     subtitlesSource: "Sumber Subtitle",
     autoFetchYoutube: "Otomatis ambil dari YouTube",
+    autoTranscriptLanguage: "Bahasa Transkrip Otomatis",
+    langIndonesian: "🇮🇩 Indonesia (ID)",
+    langEnglish: "🇺🇸 English (EN)",
+    autoTranscriptLangDesc: "Pilih bahasa transkrip dari YouTube agar transkrip dan hasil klip konsisten tanpa salah terjemahan.",
     uploadCustomSubtitles: "Unggah Subtitle Manual (.srt, .txt)",
     chooseSrtTxt: "📂 Pilih Berkas SRT/TXT",
     subtitlesLoaded: (name: string) => `Dimuat: ${name}`,

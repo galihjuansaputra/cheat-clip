@@ -24,6 +24,7 @@ from backend.services.youtube_service import (
     get_supadata_usage_data,
     get_youtube_oembed_title,
     normalize_transcript,
+    prioritize_transcripts,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "get_supadata_usage_data",
     "get_youtube_oembed_title",
     "normalize_transcript",
+    "prioritize_transcripts",
 ]

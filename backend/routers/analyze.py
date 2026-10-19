@@ -216,23 +216,30 @@ async def analyze_video(request: AnalyzeRequest):
                 yield _sse({"error": f"Failed to parse manual subtitles: {str(e)}", "status": 400})
                 return
         else:
+            pref_lang_name = "Indonesian" if str(request.transcript_lang or "id").lower().startswith(('id', 'in')) else "English"
             yield _sse({
                 "step": 3,
                 "step_progress": 30,
                 "overall_progress": 55,
                 "stage": "Fetching Transcript",
-                "detail": "Extracting YouTube subtitles & timestamps...",
-                "message": "Fetching YouTube transcript..."
+                "detail": f"Extracting YouTube subtitles & timestamps ({pref_lang_name})...",
+                "message": f"Fetching YouTube transcript ({pref_lang_name})..."
             })
             try:
-                transcript_lines = await asyncio.to_thread(fetch_transcript, video_id, request.proxy)
+                transcript_lines = await asyncio.to_thread(
+                    fetch_transcript,
+                    video_id,
+                    request.proxy,
+                    None,
+                    request.transcript_lang or "id"
+                )
                 yield _sse({
                     "step": 3,
                     "step_progress": 100,
                     "overall_progress": 70,
                     "stage": "Transcript Ready",
-                    "detail": f"YouTube transcript loaded — {len(transcript_lines)} dialogue segments parsed.",
-                    "message": f"Transcript loaded — {len(transcript_lines)} lines."
+                    "detail": f"YouTube transcript loaded — {len(transcript_lines)} dialogue segments parsed ({pref_lang_name}).",
+                    "message": f"Transcript loaded — {len(transcript_lines)} lines ({pref_lang_name})."
                 })
             except Exception as e:
                 if is_mock:

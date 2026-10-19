@@ -40,6 +40,7 @@ class AnalyzeRequest(BaseModel):
     subtitles_filename: Optional[str] = Field(None, description="Optional manual subtitles filename")
     target_clip_count: Optional[Union[int, str]] = Field(None, description="Optional target number of clips or 'auto'")
     proxy: Optional[str] = Field(None, description="Optional custom proxy URL")
+    transcript_lang: Optional[str] = Field("id", description="Preferred transcript language ('id' for Indonesian, 'en' for English)")
 
 class HeatmapPoint(BaseModel):
     start_time: float
